@@ -485,6 +485,15 @@ export const chats = {
 
 /* ------------------------------ materials ----------------------------- */
 
+const parseMaterialFiles = (raw) => {
+  try {
+    const list = JSON.parse(raw || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+};
+
 const materialRowToApi = (row) => ({
   id: row.id,
   title: row.title,
@@ -493,6 +502,7 @@ const materialRowToApi = (row) => ({
   url: row.url || '',
   description: row.description || '',
   bookmarks: row.bookmarks || 0,
+  files: parseMaterialFiles(row.files),
 });
 
 export const materials = {
@@ -535,8 +545,131 @@ export const materials = {
     return materials.get(id);
   },
 
+  /** Replace the uploaded-PDF metadata list for one material. */
+  setFiles(id, files = []) {
+    getDb()
+      .prepare('UPDATE materials SET files = ?, updated_at = ? WHERE id = ?')
+      .run(JSON.stringify(files), new Date().toISOString(), String(id));
+    return materials.get(id);
+  },
+
   remove(id) {
     return getDb().prepare('DELETE FROM materials WHERE id = ?').run(String(id)).changes > 0;
+  },
+};
+
+/* --------------------------- material files --------------------------- */
+/**
+ * Uploaded PDF bytes, stored in fixed-size chunks so no row approaches D1's
+ * limits. Metadata (file name, size, mime) lives in `materials.files`; this
+ * repository only owns the bytes.
+ */
+export const materialFiles = {
+  putChunks(fileId, chunks = []) {
+    const db = getDb();
+    const del = db.prepare('DELETE FROM material_file_chunks WHERE file_id = ?');
+    const ins = db.prepare(
+      'INSERT INTO material_file_chunks (file_id, chunk_index, data) VALUES (?, ?, ?)'
+    );
+    tx(() => {
+      del.run(String(fileId));
+      chunks.forEach((chunk, index) => ins.run(String(fileId), index, chunk));
+    });
+  },
+
+  readChunks(fileId) {
+    return getDb()
+      .prepare('SELECT data FROM material_file_chunks WHERE file_id = ? ORDER BY chunk_index')
+      .all(String(fileId))
+      .map((row) => row.data);
+  },
+
+  remove(fileId) {
+    return (
+      getDb()
+        .prepare('DELETE FROM material_file_chunks WHERE file_id = ?')
+        .run(String(fileId)).changes > 0
+    );
+  },
+
+  removeMany(fileIds = []) {
+    if (!fileIds.length) return 0;
+    const del = getDb().prepare('DELETE FROM material_file_chunks WHERE file_id = ?');
+    return tx(() => fileIds.reduce((sum, id) => sum + del.run(String(id)).changes, 0));
+  },
+};
+
+/* ---------------------------- announcements --------------------------- */
+const parseRead = (row) =>
+  row.read_at === undefined ? {} : { read: Boolean(row.read_at), readAt: row.read_at || null };
+
+const announcementRowToApi = (row) => ({
+  id: row.id,
+  subject: row.subject || '',
+  body: row.body,
+  createdBy: row.created_by || '',
+  createdAt: row.created_at || '',
+  ...parseRead(row),
+});
+
+export const announcements = {
+  list() {
+    return getDb()
+      .prepare('SELECT * FROM announcements ORDER BY created_at DESC, id DESC')
+      .all()
+      .map(announcementRowToApi);
+  },
+
+  get(id) {
+    const row = getDb().prepare('SELECT * FROM announcements WHERE id = ?').get(String(id || ''));
+    return row ? announcementRowToApi(row) : null;
+  },
+
+  create(data) {
+    getDb()
+      .prepare(
+        'INSERT INTO announcements (id, subject, body, created_by, created_at) VALUES (?, ?, ?, ?, ?)'
+      )
+      .run(
+        data.id,
+        String(data.subject || ''),
+        String(data.body || ''),
+        String(data.createdBy || ''),
+        data.createdAt || new Date().toISOString()
+      );
+    return announcements.get(data.id);
+  },
+
+  /** Every announcement visible to a student, with their read flag. */
+  forStudent(studentId, since = '') {
+    return getDb()
+      .prepare(
+        `SELECT a.*, r.read_at
+           FROM announcements a
+           LEFT JOIN announcement_reads r
+             ON r.announcement_id = a.id AND r.student_id = ?
+          WHERE (? = '' OR a.created_at >= ?)
+          ORDER BY a.created_at DESC, a.id DESC`
+      )
+      .all(String(studentId), String(since || ''), String(since || ''))
+      .map(announcementRowToApi);
+  },
+
+  markRead(studentId, ids = []) {
+    if (!ids.length) return 0;
+    const ins = getDb().prepare(
+      'INSERT OR IGNORE INTO announcement_reads (announcement_id, student_id, read_at) VALUES (?, ?, ?)'
+    );
+    const at = new Date().toISOString();
+    return tx(() => ids.reduce((sum, id) => sum + ins.run(String(id), String(studentId), at).changes, 0));
+  },
+
+  remove(id) {
+    const db = getDb();
+    return tx(() => {
+      db.prepare('DELETE FROM announcement_reads WHERE announcement_id = ?').run(String(id));
+      return db.prepare('DELETE FROM announcements WHERE id = ?').run(String(id)).changes > 0;
+    });
   },
 };
 

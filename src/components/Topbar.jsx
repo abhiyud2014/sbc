@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Menu, Plus, Megaphone, ChevronDown, LogOut, ShieldCheck, UserRound, Users, KeyRound } from 'lucide-react';
+import { Menu, Plus, Megaphone, ChevronDown, LogOut, ShieldCheck, UserRound, Users, KeyRound, MessageSquare } from 'lucide-react';
 import { initials } from '../lib/format.js';
 import { api } from '../lib/api.js';
 import { usePending } from '../hooks/useApi.js';
@@ -29,6 +29,8 @@ export default function Topbar({
   onSwitchRole,
   onRefreshStudents,
   onSignOut,
+  unreadAnnouncements = 0,
+  onOpenAnnouncements,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const { showToast } = useToast();
@@ -98,6 +100,25 @@ export default function Topbar({
       </div>
 
       <div className="flex items-center gap-3">
+        {!isHost ? (
+          <button
+            type="button"
+            onClick={onOpenAnnouncements}
+            className="relative rounded-lg border border-slate-700 bg-slate-800 p-2 text-slate-300 transition hover:bg-slate-700 hover:text-white"
+            aria-label={
+              unreadAnnouncements > 0 ? `Messages (${unreadAnnouncements} unread)` : 'Messages'
+            }
+            title="Messages"
+          >
+            <MessageSquare size={16} />
+            {unreadAnnouncements > 0 ? (
+              <span className="absolute -right-1.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-red-500 px-1 text-[9px] font-bold leading-none text-white shadow">
+                {unreadAnnouncements > 99 ? '99+' : unreadAnnouncements}
+              </span>
+            ) : null}
+          </button>
+        ) : null}
+
         {isAdmin ? (
           <>
             <button

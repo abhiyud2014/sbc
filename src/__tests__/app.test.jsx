@@ -264,6 +264,12 @@ function mockFetch() {
     passwordChanges: [],
     classPasswordWrites: [],
     studentPasswordWrites: [],
+    announcementPosts: [],
+    announcementReads: 0,
+    rosterError: false,
+    seedAnnouncements: (list) => {
+      announcements = list.map((a) => ({ ...a }));
+    },
   };
   let classPassword = ''; // admin-managed shared password (GET/PUT /api/class-password)
   let materials = [
@@ -276,6 +282,7 @@ function mockFetch() {
   let targets = {};
   let meetings = MEETINGS.meetings.map((m) => ({ ...m }));
   let chats = {}; // key -> messages (server-side chat history)
+  let announcements = []; // in-app broadcasts (newest first)
 
   vi.stubGlobal(
     'fetch',
@@ -285,6 +292,16 @@ function mockFetch() {
       const method = (init.method || 'GET').toUpperCase();
       const payload = init.body ? JSON.parse(init.body) : null;
       let body = null;
+
+      // Simulate the attendance roster being unavailable while the in-app
+      // composer must still publish.
+      if (url.includes('/api/roster') && mock.rosterError) {
+        return {
+          ok: false,
+          status: 500,
+          text: async () => JSON.stringify({ error: { message: 'Zoom roster unavailable' } }),
+        };
+      }
 
       if (url.includes('/api/auth/me')) {
         // Boots as Admin whenever the seeded test token is present.
@@ -331,6 +348,30 @@ function mockFetch() {
           mock.classPasswordWrites.push(classPassword);
         }
         body = { configured: Boolean(classPassword) };
+      } else if (url.includes('/api/announcements')) {
+        // In-app broadcasts: GET returns the list + this student's unread count.
+        if (method === 'POST' && url.includes('/read-all')) {
+          announcements = announcements.map((a) => ({ ...a, read: true }));
+          mock.announcementReads += 1;
+          body = { ok: true, marked: announcements.length, unread: 0 };
+        } else if (method === 'POST') {
+          const created = {
+            id: `ann-${announcements.length + 1}`,
+            subject: payload?.subject || '',
+            body: payload?.body || '',
+            createdBy: 'Admin',
+            createdAt: new Date().toISOString(),
+            read: false,
+          };
+          mock.announcementPosts.push(payload);
+          announcements = [created, ...announcements];
+          body = created;
+        } else {
+          body = {
+            announcements,
+            unread: announcements.filter((a) => !a.read).length,
+          };
+        }
       } else if (url.includes('/api/chats')) {
         // Server-side chat history: PUT stores, GET returns (or [] when new).
         const key = decodeURIComponent(url.split('/api/chats/')[1] || '');
@@ -673,6 +714,77 @@ describe('SBC-LMS dashboard', () => {
     expect(within(confirm).getByText(/Remove/)).toBeTruthy();
     fireEvent.click(within(confirm).getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(screen.queryByText(/Remove/)).toBeNull(), { timeout: 3000 });
+  });
+
+  it('publishes an in-app announcement to every student', async () => {
+    renderApp();
+    fireEvent.click(await screen.findByText('Broadcast'));
+    const dialog = await screen.findByRole('dialog');
+
+    fireEvent.change(within(dialog).getByLabelText('Subject'), {
+      target: { value: 'Class moved to 4 PM' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Message'), {
+      target: { value: 'This Saturday starts at 4 PM. Bring your risk sheet.' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /Publish to all students/ }));
+
+    await waitFor(() => expect(mock.announcementPosts).toHaveLength(1));
+    expect(mock.announcementPosts[0]).toEqual({
+      subject: 'Class moved to 4 PM',
+      body: 'This Saturday starts at 4 PM. Bring your risk sheet.',
+    });
+    expect((await screen.findAllByText('Published to all students')).length).toBeGreaterThan(0);
+  });
+
+  it('keeps the in-app composer usable when the attendance roster fails', async () => {
+    mock.rosterError = true;
+    renderApp();
+    fireEvent.click(await screen.findByText('Broadcast'));
+    const dialog = await screen.findByRole('dialog');
+
+    // The email roster error is reported, but the form still renders.
+    expect(await within(dialog).findByText(/in-app publishing still works/)).toBeTruthy();
+    fireEvent.change(within(dialog).getByLabelText('Message'), {
+      target: { value: 'Roster is down but this still reaches everyone.' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /Publish to all students/ }));
+
+    await waitFor(() => expect(mock.announcementPosts).toHaveLength(1));
+    expect(mock.announcementPosts[0].body).toBe('Roster is down but this still reaches everyone.');
+  });
+
+  it('pops up an unread announcement once and clears the badge on dismiss', async () => {
+    mock.seedAnnouncements([
+      {
+        id: 'ann-1',
+        subject: 'Class moved to 4 PM',
+        body: 'This Saturday starts at 4 PM.',
+        createdAt: new Date().toISOString(),
+        read: false,
+      },
+    ]);
+    localStorage.removeItem('sbc.token');
+    renderApp();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Student/ }));
+    fireEvent.change(await screen.findByLabelText('Email'), { target: { value: 'priya@example.com' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'class-pass-1' } });
+    fireEvent.click(screen.getByRole('button', { name: /Sign in/ }));
+
+    // The message centre opens by itself with the unread announcement…
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByText('Class moved to 4 PM')).toBeTruthy();
+    expect(within(dialog).getByText('This Saturday starts at 4 PM.')).toBeTruthy();
+    // …and the top-right icon carries the red unread count.
+    expect(screen.getByLabelText('Messages (1 unread)')).toBeTruthy();
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /mark as read/i }));
+
+    await waitFor(() => expect(mock.announcementReads).toBe(1));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(await screen.findByLabelText('Messages')).toBeTruthy();
+    expect(screen.queryByText('1 unread')).toBeNull();
   });
 
   it('adds a student to a batch and browses batches', async () => {

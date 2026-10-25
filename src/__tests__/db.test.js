@@ -16,6 +16,8 @@ import {
   knowledge,
   chats,
   materials,
+  materialFiles,
+  announcements,
   auth,
 } from '../../server/repos.js';
 import { KNOWLEDGE_SEED } from '../../server/knowledge-seed.js';
@@ -345,5 +347,67 @@ describe('class password + personal override', () => {
     students.create({ id: 'stu-none', createdAt: now(), name: 'None', email: 'none@test.com', batches: [] });
     expect(auth.checkStudentPassword('stu-none', 'anything')).toBe('unprovisioned');
     expect(auth.checkStudentPassword('stu-missing', 'anything')).toBe('bad'); // unknown student
+  });
+});
+
+describe('material PDFs + announcements', () => {
+  it('stores PDF bytes as ordered chunks and replaces/deletes them', () => {
+    materialFiles.putChunks('file-a', [Buffer.from('first'), Buffer.from('second')]);
+    expect(materialFiles.readChunks('file-a').map((c) => Buffer.from(c).toString())).toEqual([
+      'first',
+      'second',
+    ]);
+
+    // putChunks replaces rather than appends.
+    materialFiles.putChunks('file-a', [Buffer.from('only')]);
+    expect(materialFiles.readChunks('file-a').map((c) => Buffer.from(c).toString())).toEqual(['only']);
+
+    materialFiles.putChunks('file-b', [Buffer.from('b')]);
+    expect(materialFiles.removeMany(['file-a', 'file-b'])).toBe(2);
+    expect(materialFiles.readChunks('file-a')).toEqual([]);
+    expect(materialFiles.remove('file-b')).toBe(false); // already gone
+  });
+
+  it('keeps uploaded-file metadata on the material', () => {
+    materials.create({ id: 'mat-files', title: 'Has PDF', category: '', type: '', url: '', description: '' });
+    const file = { id: 'file-a', name: 'guide.pdf', size: 10, mimeType: 'application/pdf' };
+    const updated = materials.setFiles('mat-files', [file]);
+    expect(updated.files).toEqual([file]);
+    expect(materials.get('mat-files').files).toEqual([file]);
+  });
+
+  it('publishes announcements and tracks each student’s read state', () => {
+    students.create({ id: 'stu-ann', createdAt: now(), name: 'Ann', email: 'ann@test.com', batches: [] });
+    students.create({ id: 'stu-ann2', createdAt: now(), name: 'Bea', email: 'bea@test.com', batches: [] });
+    const created = announcements.create({
+      id: 'ann-1',
+      subject: 'Class moved',
+      body: 'This Saturday starts at 4 PM.',
+      createdBy: 'Admin',
+      createdAt: '2026-10-01T10:00:00.000Z',
+    });
+    expect(created.subject).toBe('Class moved');
+    expect(announcements.list().map((a) => a.id)).toEqual(['ann-1']);
+
+    let mine = announcements.forStudent('stu-ann');
+    expect(mine).toHaveLength(1);
+    expect(mine[0].read).toBe(false);
+
+    expect(announcements.markRead('stu-ann', ['ann-1'])).toBe(1);
+    mine = announcements.forStudent('stu-ann');
+    expect(mine[0].read).toBe(true);
+    // Marking again is a no-op (INSERT OR IGNORE).
+    expect(announcements.markRead('stu-ann', ['ann-1'])).toBe(0);
+
+    // Another student still has it unread.
+    expect(announcements.forStudent('stu-ann2')[0].read).toBe(false);
+
+    // `since` hides announcements older than the student's enrolment.
+    expect(announcements.forStudent('stu-ann', '2026-10-02T00:00:00.000Z')).toHaveLength(0);
+
+    // Removing the announcement also drops its read rows.
+    expect(announcements.remove('ann-1')).toBe(true);
+    expect(announcements.list()).toEqual([]);
+    expect(announcements.forStudent('stu-ann')).toEqual([]);
   });
 });

@@ -132,8 +132,34 @@ CREATE TABLE IF NOT EXISTS materials (
   url         TEXT NOT NULL DEFAULT '',
   description TEXT NOT NULL DEFAULT '',
   bookmarks   INTEGER NOT NULL DEFAULT 0,
+  files       TEXT NOT NULL DEFAULT '[]',   -- JSON metadata for uploaded PDFs
   created_at  TEXT NOT NULL DEFAULT '',
   updated_at  TEXT NOT NULL DEFAULT ''
+);
+
+-- PDF bytes are split into chunks so every row stays well below D1's row
+-- limit; metadata (name/size/mime) lives in materials.files.
+CREATE TABLE IF NOT EXISTS material_file_chunks (
+  file_id     TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  data        BLOB NOT NULL,
+  PRIMARY KEY (file_id, chunk_index)
+);
+
+CREATE TABLE IF NOT EXISTS announcements (
+  id         TEXT PRIMARY KEY,
+  subject    TEXT NOT NULL DEFAULT '',
+  body       TEXT NOT NULL,
+  created_by TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_announcements_created ON announcements(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS announcement_reads (
+  announcement_id TEXT NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+  student_id      TEXT NOT NULL REFERENCES students(id)      ON DELETE CASCADE,
+  read_at         TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY (announcement_id, student_id)
 );
 
 CREATE TABLE IF NOT EXISTS auth_sessions (
@@ -174,6 +200,11 @@ function migrate(db) {
     INSERT OR IGNORE INTO settings (key, value) SELECT 'class_password', value FROM settings WHERE key = 'student_passcode';
     DELETE FROM settings WHERE key = 'student_passcode';
   `);
+  // PDF uploads added a `files` metadata column to materials.
+  const materialCols = db.prepare('PRAGMA table_info(materials)').all();
+  if (!materialCols.some((c) => c.name === 'files')) {
+    db.exec("ALTER TABLE materials ADD COLUMN files TEXT NOT NULL DEFAULT '[]'");
+  }
 }
 
 export function getDb() {

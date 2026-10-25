@@ -121,6 +121,8 @@ export function createApp({ repos, config = {}, staticDir = '' }) {
     knowledge: knowledgeRepo,
     chats: chatsRepo,
     materials: materialsRepo,
+    materialFiles: materialFilesRepo,
+    announcements: announcementsRepo,
     auth: authRepo,
   } = repos;
 
@@ -339,7 +341,10 @@ async function fetchParticipantsFor(meeting) {
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Uploads arrive as base64 JSON (one PDF per request); the default 100 kB
+// limit would reject even a single-page PDF, so allow a comfortable margin
+// over the 8 MB per-file cap enforced by the upload route.
+app.use(express.json({ limit: '12mb' }));
 
 // Tiny request log (skips the noisy health poll).
 app.use((req, _res, next) => {
@@ -583,10 +588,14 @@ app.post(
  *
  * Participants (default deny) may only:
  *   GET  /api/recordings…  /api/materials  /api/knowledge  /api/my-classes
- *   POST /api/questions    (chatbot question logging with attribution)
- *   GET/PUT /api/chats/*   (own conversation only — enforced in the route)
+ *   GET  /api/announcements  (their own read state)
+ *   POST /api/questions      (chatbot question logging with attribution)
+ *   POST /api/announcements/read-all  |  /api/announcements/:id/read
+ *   GET/PUT /api/chats/*     (own conversation only — enforced in the route)
  */
-const PARTICIPANT_READ = /^\/api\/(recordings|materials|knowledge|my-classes)(\/|$)/;
+const PARTICIPANT_READ = /^\/api\/(recordings|materials|knowledge|my-classes|announcements)(\/|$)/;
+const PARTICIPANT_POST =
+  /^\/api\/(questions|announcements\/read-all|announcements\/[^/]+\/read)$/;
 
 app.use(
   wrap(async (req, res, next) => {
@@ -597,7 +606,7 @@ app.use(
     if (session.role === 'admin') return next();
     const allowed =
       (req.method === 'GET' && PARTICIPANT_READ.test(req.path)) ||
-      (req.method === 'POST' && req.path === '/api/questions') ||
+      (req.method === 'POST' && PARTICIPANT_POST.test(req.path)) ||
       req.path.startsWith('/api/chats/'); // ownership checked in the chat routes
     if (allowed) return next();
     res.status(403).json({ error: 'This area is admin-only.' });
@@ -1321,9 +1330,127 @@ function normaliseMaterial(input, existing = {}) {
   };
 }
 
+/** Public shape of a material, including openable URLs for uploaded PDFs. */
+function presentMaterial(material) {
+  const id = String(material.id || '');
+  return {
+    ...material,
+    files: (material.files || []).map((file) => ({
+      ...file,
+      url: `/api/materials/${encodeURIComponent(id)}/files/${encodeURIComponent(file.id)}`,
+    })),
+  };
+}
+
 app.get(
   '/api/materials',
-  wrap(async (_req, res) => res.json({ materials: await readMaterials() }))
+  wrap(async (_req, res) =>
+    res.json({ materials: (await readMaterials()).map(presentMaterial) })
+  )
+);
+
+// One PDF per request keeps the JSON body well inside the Workers limit and
+// lets the browser show per-file progress. Only the first `%PDF-` bytes are
+// trusted; the browser-supplied MIME type is not.
+const PDF_MAX_BYTES = 8 * 1024 * 1024;
+const PDF_CHUNK_BYTES = 256 * 1024;
+const PDF_MAX_PER_REQUEST = 10;
+
+const pdfFileName = (raw) =>
+  String(raw || 'document.pdf')
+    .replace(/[\\/:*?"<>|\r\n]+/g, '-')
+    .trim()
+    .slice(0, 120) || 'document.pdf';
+
+function decodePdfUpload(input) {
+  const name = pdfFileName(input?.name);
+  const raw = String(input?.data || '');
+  const base64 = raw.startsWith('data:') ? raw.slice(raw.indexOf(',') + 1) : raw;
+  const bytes = Buffer.from(base64, 'base64');
+  if (!bytes.length) throw new HttpError(400, `“${name}” is empty.`);
+  if (bytes.length > PDF_MAX_BYTES) {
+    throw new HttpError(413, `“${name}” is larger than 8 MB. Choose a smaller PDF.`);
+  }
+  if (bytes.subarray(0, 5).toString('latin1') !== '%PDF-') {
+    throw new HttpError(400, `“${name}” is not a valid PDF file.`);
+  }
+  return { name, bytes };
+}
+
+app.post(
+  '/api/materials/:id/files',
+  wrap(async (req, res) => {
+    const material = await materialsRepo.get(req.params.id);
+    if (!material) throw new HttpError(404, 'Material not found.');
+
+    const incoming = Array.isArray(req.body?.files) ? req.body.files : [];
+    if (!incoming.length) throw new HttpError(400, 'Choose at least one PDF to upload.');
+    if (incoming.length > PDF_MAX_PER_REQUEST) {
+      throw new HttpError(400, `Upload at most ${PDF_MAX_PER_REQUEST} PDFs at a time.`);
+    }
+
+    const files = [...(material.files || [])];
+    for (const upload of incoming) {
+      const { name, bytes } = decodePdfUpload(upload);
+      const fileId = `file-${crypto.randomBytes(8).toString('hex')}`;
+      const chunks = [];
+      for (let offset = 0; offset < bytes.length; offset += PDF_CHUNK_BYTES) {
+        chunks.push(bytes.subarray(offset, offset + PDF_CHUNK_BYTES));
+      }
+      await materialFilesRepo.putChunks(fileId, chunks);
+      files.push({
+        id: fileId,
+        name,
+        size: bytes.length,
+        mimeType: 'application/pdf',
+        uploadedAt: new Date().toISOString(),
+      });
+    }
+
+    res.status(201).json(presentMaterial(await materialsRepo.setFiles(material.id, files)));
+  })
+);
+
+app.get(
+  '/api/materials/:id/files/:fileId',
+  wrap(async (req, res) => {
+    const material = await materialsRepo.get(req.params.id);
+    if (!material) throw new HttpError(404, 'Material not found.');
+    const file = (material.files || []).find((f) => String(f.id) === String(req.params.fileId));
+    if (!file) throw new HttpError(404, 'File not found.');
+
+    const chunks = await materialFilesRepo.readChunks(file.id);
+    if (!chunks.length) throw new HttpError(404, 'This file has no stored data.');
+    const buffer = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+
+    const safeName = pdfFileName(file.name).replace(/"/g, '');
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', String(buffer.length));
+    res.setHeader(
+      'Content-Disposition',
+      `${req.query.download ? 'attachment' : 'inline'}; filename="${safeName}"`
+    );
+    res.setHeader('Cache-Control', 'private, max-age=300');
+    res.end(buffer);
+  })
+);
+
+app.delete(
+  '/api/materials/:id/files/:fileId',
+  wrap(async (req, res) => {
+    const material = await materialsRepo.get(req.params.id);
+    if (!material) throw new HttpError(404, 'Material not found.');
+    const files = material.files || [];
+    const file = files.find((f) => String(f.id) === String(req.params.fileId));
+    if (!file) throw new HttpError(404, 'File not found.');
+
+    await materialFilesRepo.remove(file.id);
+    const updated = await materialsRepo.setFiles(
+      material.id,
+      files.filter((f) => String(f.id) !== String(file.id))
+    );
+    res.json(presentMaterial(updated));
+  })
 );
 
 app.post(
@@ -1331,7 +1458,7 @@ app.post(
   wrap(async (req, res) => {
     await readMaterials(); // ensures the seed has run
     const material = { id: `mat-${Date.now().toString(36)}`, bookmarks: 0, ...normaliseMaterial(req.body || {}) };
-    res.status(201).json(await materialsRepo.create(material));
+    res.status(201).json(presentMaterial(await materialsRepo.create(material)));
   })
 );
 
@@ -1340,14 +1467,109 @@ app.patch(
   wrap(async (req, res) => {
     const existing = await materialsRepo.get(req.params.id);
     if (!existing) throw new HttpError(404, 'Material not found.');
-    res.json(await materialsRepo.update(req.params.id, normaliseMaterial(req.body || {}, existing)));
+    res.json(
+      presentMaterial(
+        await materialsRepo.update(req.params.id, normaliseMaterial(req.body || {}, existing))
+      )
+    );
   })
 );
 
 app.delete(
   '/api/materials/:id',
   wrap(async (req, res) => {
+    const existing = await materialsRepo.get(req.params.id);
+    if (!existing) throw new HttpError(404, 'Material not found.');
+    const fileIds = (existing.files || []).map((f) => f.id);
+    if (fileIds.length) await materialFilesRepo.removeMany(fileIds);
     if (!(await materialsRepo.remove(req.params.id))) throw new HttpError(404, 'Material not found.');
+    res.status(204).end();
+  })
+);
+
+/* --------------------------- announcements -------------------------- */
+/**
+ * In-app announcements ("broadcast") — one message for every student.
+ *
+ * A student sees each announcement once: `GET /api/announcements` returns the
+ * list with their own read flag, and the app marks the visible ones read when
+ * the message panel is dismissed. Read state is per student, so two students
+ * on different devices never affect each other.
+ */
+const announcementVisibleSince = async (student) => student?.createdAt || '';
+
+app.get(
+  '/api/announcements',
+  wrap(async (req, res) => {
+    if (req.session.role === 'admin') {
+      return res.json({ announcements: await announcementsRepo.list(), unread: 0 });
+    }
+    const student = await studentsRepo.get(req.session.user?.id || '');
+    if (!student) throw new HttpError(404, 'Student not found.');
+    const announcements = await announcementsRepo.forStudent(
+      student.id,
+      await announcementVisibleSince(student)
+    );
+    res.json({ announcements, unread: announcements.filter((a) => !a.read).length });
+  })
+);
+
+app.post(
+  '/api/announcements',
+  wrap(async (req, res) => {
+    const subject = String(req.body?.subject || '').trim().slice(0, 140);
+    const body = String(req.body?.body || '').trim();
+    if (!body) throw new HttpError(400, 'Write a message before publishing.');
+    if (body.length > 4000) throw new HttpError(400, 'Keep the message under 4,000 characters.');
+    const created = await announcementsRepo.create({
+      id: `ann-${Date.now().toString(36)}${crypto.randomBytes(3).toString('hex')}`,
+      subject,
+      body,
+      createdBy: 'Admin',
+    });
+    res.status(201).json(created);
+  })
+);
+
+app.post(
+  '/api/announcements/read-all',
+  wrap(async (req, res) => {
+    if (req.session.role !== 'participant') {
+      throw new HttpError(403, 'Only students have announcement read state.');
+    }
+    const student = await studentsRepo.get(req.session.user?.id || '');
+    if (!student) throw new HttpError(404, 'Student not found.');
+    const visible = await announcementsRepo.forStudent(
+      student.id,
+      await announcementVisibleSince(student)
+    );
+    const marked = await announcementsRepo.markRead(student.id, visible.map((a) => a.id));
+    res.json({ ok: true, marked, unread: 0 });
+  })
+);
+
+app.post(
+  '/api/announcements/:id/read',
+  wrap(async (req, res) => {
+    if (req.session.role !== 'participant') {
+      throw new HttpError(403, 'Only students have announcement read state.');
+    }
+    const student = await studentsRepo.get(req.session.user?.id || '');
+    if (!student) throw new HttpError(404, 'Student not found.');
+    if (!(await announcementsRepo.get(req.params.id))) {
+      throw new HttpError(404, 'Announcement not found.');
+    }
+    await announcementsRepo.markRead(student.id, [req.params.id]);
+    res.json({ ok: true, unread: 0 });
+  })
+);
+
+app.delete(
+  '/api/announcements/:id',
+  wrap(async (req, res) => {
+    if (!(await announcementsRepo.remove(req.params.id))) {
+      throw new HttpError(404, 'Announcement not found.');
+    }
     res.status(204).end();
   })
 );

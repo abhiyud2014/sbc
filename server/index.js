@@ -19,6 +19,8 @@ import {
   knowledge,
   chats,
   materials,
+  materialFiles,
+  announcements,
   auth,
 } from './repos.js';
 import { KNOWLEDGE_SEED } from './knowledge-seed.js';
@@ -41,7 +43,7 @@ if (seededKnowledge.added) {
 
 const dist = path.join(__dirname, '..', 'dist');
 const app = createApp({
-  repos: { students, batches, targets, questions, knowledge, chats, materials, auth },
+  repos: { students, batches, targets, questions, knowledge, chats, materials, materialFiles, announcements, auth },
   config: {
     zoomAccountId: process.env.ZOOM_ACCOUNT_ID,
     zoomClientId: process.env.ZOOM_CLIENT_ID,

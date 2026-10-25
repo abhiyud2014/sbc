@@ -81,8 +81,9 @@ The live deployment is:
 | Q&A audit log | Every bot question is logged with attribution; Zoom in-meeting Q&A can be merged; the mentor can answer, correct, and promote answers. |
 | AI Knowledge Bot | A local, deterministic retrieval assistant over a 180-entry knowledge bank plus mentor-approved answers. It is **not** an external LLM. |
 | Dynamic quick prompts | Six starter questions are drawn from the live knowledge bank; **Shuffle** shows another set. |
-| Reference Hub | Admin-managed materials with level, type, description, and URL; students browse and open them. |
-| Broadcast | Compose an announcement, copy it, copy recipient addresses, or open the local mail client with recipients in BCC. |
+| Reference Hub | Admin-managed materials with level, type, description, an external link and/or uploaded PDF documents; students browse, open and download them. |
+| Broadcast | Compose an announcement and publish it in-app to every student, and/or copy it, copy recipient addresses, or open the local mail client with recipients in BCC. |
+| Student message centre | The right-top message icon shows a red unread count; announcements pop up once at sign-in and clear when dismissed. |
 | Admin preview | An admin can preview the student experience for any enrolled student without creating a second account or changing session role. |
 | Local/production parity | The same Express routes power local Node and Cloudflare Workers; only the repository and static-serving layers differ. |
 
@@ -259,9 +260,10 @@ The top bar displays the current page title and subtitle, the user's initials, a
 | Cloud Recordings | Yes | Yes, read-only |
 | Students & Batches | Yes | No |
 | Q&A Log | Yes | No |
-| Reference Hub | Add/edit/delete | Read-only |
+| Reference Hub | Add/edit/delete (including PDF uploads) | Read-only |
 | AI Knowledge Bot | Yes | Yes |
-| Broadcast | Yes | No |
+| Broadcast | Yes (publish in-app and/or email handoff) | No |
+| Student message centre | Not applicable (admin preview does not consume read state) | Yes — own messages only |
 | Change password | No (PIN-based) | Yes |
 | One active session rule | No | Yes |
 | Admin preview of student UI | Yes | Not applicable |
@@ -423,7 +425,7 @@ Worker caches are best-effort and per isolate. A cold start or a different isola
 |---|---|---|
 | App shell | `src/App.jsx` | Validates the session, chooses the role, enforces landing-page fallback, renders pages, manages preview mode and global modals. |
 | Sidebar | `src/components/Sidebar.jsx` | Role-filtered navigation, collapse/remember state, mobile drawer, Zoom status. |
-| Topbar | `src/components/Topbar.jsx` | Page title/subtitle, Broadcast, Schedule Zoom, account menu, preview switcher, student password change, sign-out. |
+| Topbar | `src/components/Topbar.jsx` | Page title/subtitle, Broadcast, Schedule Zoom, student message icon with unread badge, account menu, preview switcher, student password change, sign-out. |
 | Login | `src/pages/Login.jsx` | Admin/student mode toggle and credential forms. |
 | Dashboard | `src/pages/Dashboard.jsx` | Admin metrics, Zoom connection banner, next session, quick tools, replay coverage. |
 | Sessions | `src/pages/Sessions.jsx` | Meeting list, create/edit/delete, registrants, batch enrolment, attendance entry point. |
@@ -431,10 +433,11 @@ Worker caches are best-effort and per isolate. A cold start or a different isola
 | Activity | `src/pages/Activity.jsx` | Past meeting report, raw/deduplicated attendees, attendance audit. |
 | Recordings | `src/pages/Recordings.jsx` | Cloud recording cards, play/download/share links, file metadata. |
 | Questions | `src/pages/Questions.jsx` | Q&A log, Zoom Q&A merge, answer editing, knowledge promotion. |
-| Resources | `src/pages/Resources.jsx` | Material grid, filters, admin CRUD, student read-only view. |
+| Resources | `src/pages/Resources.jsx` | Material grid, filters, admin CRUD with multi-PDF upload/removal, student read-only view. |
 | Chatbot | `src/pages/Chatbot.jsx` | Local assistant, mode selection, quick prompts, chat persistence, mentor-correction sync. |
 | MyClasses | `src/pages/MyClasses.jsx` | Student landing: assigned classes, personal/shared links, attendance history. |
-| Broadcast | `src/components/Broadcast.jsx` | Announcement composer, audience selection, mail-client handoff. |
+| Broadcast | `src/components/Broadcast.jsx` | Announcement composer, audience selection, in-app publish, mail-client handoff. |
+| Announcements | `src/components/Announcements.jsx` | Student message centre: unread announcements, read/seen state, retry. |
 | Attendance modal | `src/components/AttendanceModal.jsx` | Expected vs joined vs absent vs guests; retroactive batch assignment. |
 | Shared UI | `src/components/ui.jsx`, `Modal.jsx`, `ToastProvider.jsx` | Cards, badges, empty/error/loading states, dialogs, toasts, copy buttons. |
 | API client | `src/lib/api.js` | Token storage, fetch wrapper, 401 sign-out event. |
@@ -448,7 +451,7 @@ Worker caches are best-effort and per isolate. A cold start or a different isola
 
 | Component | File | Responsibility |
 |---|---|---|
-| Express API | `server/app.js` | All `/api/*` routes, auth middleware, Zoom proxy, registrations, attendance, Q&A, knowledge, chats, materials, my-classes. |
+| Express API | `server/app.js` | All `/api/*` routes, auth middleware, Zoom proxy, registrations, attendance, Q&A, knowledge, chats, materials (including PDF upload/download), announcements, my-classes. |
 | Local entry | `server/index.js` | Loads `.env`, opens SQLite, runs schema/housekeeping, seeds knowledge/materials/secrets, starts Express on port `8787`. |
 | SQLite setup | `server/db.js` | Database file creation, schema application, pragmas, helper access. |
 | Local repositories | `server/repos.js` | Synchronous student, batch, target, registration, question, knowledge, chat, material, auth access. Enforces one-session rule. |
@@ -527,9 +530,10 @@ Worker caches are best-effort and per isolate. A cold start or a different isola
 | Zoom Reports API | Past meetings, participants, Q&A, summaries | Activity/Q&A show a scope or report error with setup guidance. |
 | Zoom Cloud Recording API | List recordings and signed playback/download links | Recordings page shows an error or empty state. |
 | Zoom Webinars API | Webinar count/routes | Current account has no Webinar add-on, so routes fail and Dashboard shows **Plan required**. |
-| Mail client | Broadcast handoff | No automatic delivery; the user's default mail client opens. |
+| Mail client | Optional email handoff for Broadcast | No automatic delivery; the user's default mail client opens. |
+| LMS database | In-app announcements and PDF storage | Announced messages persist in D1/SQLite; unread badges refresh on the next poll. |
 | No external LLM | AI assistant | The bot runs locally from the knowledge bank. |
-| No SMTP/SendGrid | Broadcast | The app does not send email itself. |
+| No SMTP/SendGrid | Broadcast email | The app does not send email itself; in-app delivery is built in. |
 
 ---
 
@@ -1213,26 +1217,36 @@ Material cards show:
 - type;
 - title;
 - description;
-- URL host or **No link set**;
-- **Open** (disabled when there is no URL).
+- every attached PDF as an openable link (name + size);
+- URL host, PDF count, or **No link set**;
+- **Open** (opens the external link, or the first PDF when only files are attached; disabled when there is neither).
 
 Admin actions:
 
 - **Add material**;
 - **Edit material**;
-- **Delete material**.
+- **Delete material** (also deletes its stored PDF bytes).
 
 Material fields:
 
 | Field | Options / notes |
 |---|---|
 | **Title** | Required. |
-| **URL** | Optional; used by **Open**. |
+| **URL** | Optional external link; **Open** prefers it, then the first PDF. |
+| **PDF documents** | One or more PDFs per material. **8 MB per PDF**, up to **10 PDFs per upload request**. Only files whose bytes start with `%PDF-` are accepted; other files are rejected. |
 | **Category** | Beginner, Intermediate, Advanced. |
 | **Type** | Reference Guide, Concept Guide, API Reference, Worksheet, Practice Tool, Video Recording. |
 | **Description** | Optional summary. |
 
-Students see the same grid without add/edit/delete controls. If a material has no URL, the student is told to ask the mentor.
+PDF handling:
+
+- PDFs are uploaded one per request as base64 JSON, sequentially, so each request stays small and the modal can show per-file progress.
+- Server-side, each PDF is split into 256 KB rows in `material_file_chunks`; file name/size/MIME metadata is stored as JSON in `materials.files`. This keeps every database row well below D1 limits.
+- Files are served from `/api/materials/:id/files/:fileId` with `Content-Type: application/pdf` and `Content-Disposition: inline`. Add `?download=1` to force a download.
+- Editing a material can add more PDFs or remove saved ones. Removed files are deleted from storage; deleting the material removes all of its PDFs.
+- PDFs are visible to every signed-in user, including students. Do not upload material that should be restricted to one batch — Reference Hub materials are global.
+
+Students see the same grid without add/edit/delete controls. If a material has no PDF and no URL, the student is told to ask the mentor.
 
 ### 9.11 AI Knowledge Bot (administrator use)
 
@@ -1335,22 +1349,26 @@ Fields and controls:
 | Control | Options / meaning |
 |---|---|
 | **Look back** | Last 7 days, Last 30 days, Last 90 days, Last year. |
-| **Audience** | **All students (N seen)** or a specific session's attendees. |
-| **Subject** | Email subject; defaults to “Announcement from SBC-LMS” in the mail client when blank. |
-| **Message** | Announcement body. |
+| **Audience** | **All students (N seen)** or a specific session's attendees. This audience applies to the email/copy actions; in-app publishing always reaches every student. |
+| **Subject** | Email subject and in-app message title; defaults to “Announcement from SBC-LMS” in the mail client when blank. |
+| **Message** | Announcement body (required for in-app publishing, maximum 4,000 characters). |
 | **Preview** | Shows the composed subject/body with the SBC-LMS signature. |
 
 Actions:
 
+- **Publish to all students** — stores the message in the LMS and delivers it to every enrolled student in-app. It appears in the student message centre (top-right message icon) as unread. This is the primary action and does not depend on the attendance roster.
 - **Open in mail client (BCC)** — opens the default mail client with all recipients in BCC, protecting student addresses from each other.
 - **Copy message** — copies the composed text.
 - **Copy addresses** — copies semicolon-separated recipient emails.
-- If the roster fails to load, the error state offers a retry.
+- If the roster fails to load, an inline error is shown but the composer still renders, so **Publish to all students** keeps working.
 
 Important behaviour:
 
-- Recipients come from the **attendance roster** for the lookback window, not directly from the enrolment list. Students who have never attended a class in that window do not appear.
-- The audience can be narrowed to attendees of one session.
+- **In-app delivery is per student and one-shot.** Each announcement is stored once and read state is tracked per student. A student sees it once; dismissing the message centre marks it read and clears the red unread count. The next sign-in does not show it again.
+- Announcements created before a student's enrolment timestamp are hidden from that student.
+- The admin **“view as” preview** never fetches or marks announcement read state, so previewing a student cannot clear their real unread messages.
+- Email recipients come from the **attendance roster** for the lookback window, not directly from the enrolment list. Students who have never attended a class in that window do not appear in the email list.
+- The email audience can be narrowed to attendees of one session.
 - The app **does not send email**. It hands the message to the local mail client.
 - To send automatically, an SMTP/SendGrid or similar provider would need to be added server-side.
 
@@ -1448,9 +1466,21 @@ Links are signed and can expire. If one stops working, reload the page to get a 
 
 **Navigation:** Sidebar → **Reference Hub**
 
-Browse guides and materials by level and search term. Select **Open** to launch a material in a new tab. Students cannot add, edit, or delete materials; ask your mentor if a link is missing.
+Browse guides and materials by level and search term. Each card lists any attached PDF documents; select a PDF name to open it, or **Open** to launch the material's external link (or its first PDF when there is no link). Students cannot add, edit, or delete materials; ask your mentor if a PDF or link is missing.
 
-### 10.5 AI Knowledge Bot
+### 10.5 Messages from your mentor
+
+When a mentor publishes an announcement, every student receives it in-app:
+
+1. A **message icon** appears at the top-right of the student view.
+2. If you have unread messages, a **red badge** shows the count (98+ messages display as `99+`).
+3. Unread messages **pop up once automatically** at sign-in in the message centre.
+4. Select **Got it — mark as read** (or close the panel) to mark everything visible as read. The red badge clears.
+5. Open the message icon any time to read older announcements; read items carry a **Read** badge.
+
+Each student's read state is separate. An announcement is shown as unread only until that student dismisses it once; the admin “view as” preview does not change it.
+
+### 10.6 AI Knowledge Bot
 
 **Navigation:** Sidebar → **AI Knowledge Bot**
 
@@ -1465,7 +1495,7 @@ The bot answers from the academy's local knowledge base and mentor-approved answ
 
 It also helps you find your way around SBC-LMS — for example, it can tell you that a recording's passcode is shown on the **Cloud Recordings** card. Questions that are neither about trading nor about using the app are refused instead of answered with a guess.
 
-### 10.6 Changing your password
+### 10.7 Changing your password
 
 1. Open the account menu.
 2. Select **Change password**.
@@ -1475,7 +1505,7 @@ It also helps you find your way around SBC-LMS — for example, it can tell you 
 
 The new password becomes personal to you and keeps working even if the mentor rotates the shared class password. It must be at least 6 characters and different from the current password.
 
-### 10.7 Signing out
+### 10.8 Signing out
 
 Open the account menu → **Sign out**. This frees your one active student session so you can sign in on another device/browser.
 
@@ -1762,7 +1792,10 @@ erDiagram
 | `knowledge` | Promoted Q&A pairs. | Unique index on `lower(question)`; optional `question_id` link. |
 | `chat_conversations` | One server-side conversation per viewer. | `key` is `admin` or student ID; `student_id` unique; cascades. |
 | `chat_messages` | Ordered chat messages. | Composite primary key (`conversation_key`, `seq`); `sender` constrained to `user` or `bot`; stores source, mode, corrected flag. |
-| `materials` | Reference Hub content. | `id` primary key; category/type/url/description; admin-managed. |
+| `materials` | Reference Hub content. | `id` primary key; category/type/url/description; `files` JSON metadata for uploaded PDFs; admin-managed. |
+| `material_file_chunks` | PDF bytes for uploaded materials. | Composite primary key (`file_id`, `chunk_index`); 256 KB chunks; cascaded explicitly when a file/material is deleted. |
+| `announcements` | In-app broadcasts from mentors. | `id` primary key; subject/body/created_by/created_at; newest first. |
+| `announcement_reads` | Per-student read state for announcements. | Composite primary key (`announcement_id`, `student_id`); cascades from both sides; presence means “seen”. |
 | `auth_sessions` | Bearer session hashes and lifecycle. | `token_hash` primary key; `role` constrained to `admin` or `participant`; indexes on expiry and student. |
 | `admins` | Admin identity and PIN hash. | Single `admin` row in the current product. |
 | `settings` | Server-side settings. | Key/value; currently holds the hashed class password under `class_password`. |
@@ -1874,14 +1907,22 @@ A blocked student login returns HTTP `409`.
 | `PUT` | `/api/meetings/:id/targets` | Admin | Assign/clear targets without Zoom registration. |
 | `GET` | `/api/meetings/:id/attendance` | Admin | Expected vs joined attendance for one meeting instance; accepts optional `uuid` and `start_time` and resolves the real past instance when the scheduled UUID is rejected. |
 
-### 13.4 Materials, Q&A, knowledge, chats, and My Classes
+### 13.4 Materials, announcements, Q&A, knowledge, chats, and My Classes
 
 | Method | Route | Access | Purpose |
 |---|---|---|---|
-| `GET` | `/api/materials` | Signed in | List materials. |
+| `GET` | `/api/materials` | Signed in | List materials with openable PDF URLs. |
 | `POST` | `/api/materials` | Admin | Add a material. |
 | `PATCH` | `/api/materials/:id` | Admin | Update a material. |
-| `DELETE` | `/api/materials/:id` | Admin | Delete a material. |
+| `DELETE` | `/api/materials/:id` | Admin | Delete a material and its stored PDF bytes. |
+| `POST` | `/api/materials/:id/files` | Admin | Upload one or more PDFs (`{ files: [{ name, data }] }`, base64; one PDF per request recommended). Requires `%PDF-` bytes and enforces 8 MB per file / 10 files per request. |
+| `GET` | `/api/materials/:id/files/:fileId` | Signed in | Stream a stored PDF inline; `?download=1` forces attachment. |
+| `DELETE` | `/api/materials/:id/files/:fileId` | Admin | Remove one stored PDF and its metadata. |
+| `GET` | `/api/announcements` | Signed in | Admin: all announcements. Student: announcements visible since enrolment, each with `read`, plus `unread` count. |
+| `POST` | `/api/announcements` | Admin | Publish an in-app announcement (`subject`, `body`; body required, max 4,000 chars). |
+| `POST` | `/api/announcements/read-all` | Student | Mark every visible announcement read; returns `unread: 0`. Idempotent. |
+| `POST` | `/api/announcements/:id/read` | Student | Mark one announcement read. |
+| `DELETE` | `/api/announcements/:id` | Admin | Delete an announcement and its read state. |
 | `GET` | `/api/questions` | Admin | Q&A log; optional `days`, `zoom=1`, `refresh=1`. |
 | `POST` | `/api/questions` | Signed in | Log a question from the bot. |
 | `PATCH` | `/api/questions/:id` | Admin | Save a mentor answer/correction. |
@@ -1899,6 +1940,9 @@ A blocked student login returns HTTP `409`.
 - `GET /api/my-classes` clamps the window to 1–90 days and defaults to 30.
 - Chat messages are bounded to 60 and individual message text is clipped to 4,000 characters.
 - Participant chat keys are checked against the signed-in student ID.
+- PDF uploads are accepted only when the decoded bytes begin with `%PDF-`; the browser-supplied MIME type is not trusted. Each PDF is capped at 8 MB and each upload request at 10 PDFs. JSON request bodies are limited to 12 MB to allow base64 encoding overhead.
+- A student's announcement list is filtered to announcements created at or after their enrolment (`createdAt`), so a new student is not shown the entire historical broadcast archive.
+- Announcement read state is scoped to the signed-in student; admin sessions and the “view as” preview never read or clear a student's state.
 - Zoom report requests are limited to a one-month range per request.
 - Admin-only routes return `403` for participants even if the UI is manipulated.
 - Expired or revoked tokens return `401`, which triggers sign-out in the SPA.
@@ -1922,6 +1966,8 @@ A blocked student login returns HTTP `409`.
 | Role enforcement | Server-side default-deny gate for participants. |
 | Generic student errors | Wrong email/password returns the same message; the unprovisioned-class-password case is a separate setup state. |
 | Chat ownership | Participants can only read/write their own chat key. |
+| PDF upload validation | Magic-byte (`%PDF-`) check, 8 MB per file, 10 files per request, JSON body capped at 12 MB; file bytes are stored server-side only. |
+| Announcement read isolation | Read state is written only for the signed-in student; admin preview does not touch it. |
 | Admin preview isolation | Preview changes UI role only; the admin token retains admin privileges. |
 | No browser secrets | The SPA never holds Zoom credentials, PIN hashes, or password hashes. |
 | Data minimization in seed export | Generated seed files are intended to be private and git-ignored. |
@@ -2010,7 +2056,9 @@ These are not blockers for the current deployment, but should be considered befo
    - attendance;
    - recordings;
    - Q&A;
-   - AI bot.
+   - AI bot;
+   - PDF upload/open from the Reference Hub;
+   - publish an announcement and confirm the student unread badge clears after dismissal.
 
 ```bash
 npm test
@@ -2023,6 +2071,15 @@ For a schema change:
 ```bash
 npm run db:schema:remote
 ```
+
+`CREATE TABLE IF NOT EXISTS` does not add columns to an existing table. The PDF-upload feature therefore needs this one-off migration on any database created before it, applied **before** deploying the Worker code that reads the column:
+
+```bash
+npx wrangler d1 execute sbc-lms --remote \
+  --command="ALTER TABLE materials ADD COLUMN files TEXT NOT NULL DEFAULT '[]'"
+```
+
+The new tables (`material_file_chunks`, `announcements`, `announcement_reads`) are created by `worker/schema.sql`; run that as well. Local SQLite applies the same column migration automatically on startup (`server/db.js`).
 
 Do not seed production with private export files unless you have verified the contents and the target environment.
 
@@ -2124,8 +2181,12 @@ Do not seed production with private export files unless you have verified the co
 | AI bot gives fallback | No confident knowledge match | Rephrase, or promote a mentor answer into the knowledge base. |
 | AI bot refuses a legitimate trading question | Question had no market-domain word or only one ambiguous word | Include the topic term (for example “stop loss”, “F&O”, “position size”), or promote a mentor answer and report the phrasing. |
 | Cannot schedule a Zoom session | No batch selected (mandatory) or no batches exist | Select at least one **Enrol batches** chip; create a batch under **Students & Batches → Batches** first. |
-| Broadcast has no recipients | No attendance in the lookback window or no emails | Widen the lookback, verify attendance, add emails. |
-| Broadcast does not send | It is intentionally a mail-client handoff | Send from the mail client, or add a server-side email provider. |
+| Broadcast has no email recipients | No attendance in the lookback window or no emails | Widen the lookback, verify attendance, add emails — or use **Publish to all students**, which does not need the roster. |
+| Broadcast does not send email | It is intentionally a mail-client handoff | Send from the mail client, or add a server-side email provider. |
+| PDF upload rejected | Not a real PDF (`%PDF-` missing), over 8 MB, or more than 10 files in one request | Upload a valid PDF up to 8 MB; retry with fewer files. |
+| Uploaded PDF will not open | File bytes were removed or the material was edited | Re-upload the PDF; check the Worker/D1 logs if it repeats. |
+| Student does not see an announcement | Announcement predates their enrolment, or another browser already marked it read | Publish a new announcement; read state is per student and per message. |
+| Red unread badge will not clear | The read request failed while offline | Reopen the message centre and dismiss it again; the badge also refreshes on the 60-second poll. |
 | Admin preview shows “No student selected” | No participant chosen | Account menu → Participants → choose a student. |
 | Worker returns “API is still starting” | D1/init not finished | Retry after a moment; check Worker logs. |
 | D1 query fails | Schema missing, binding wrong, or database unavailable | Apply `worker/schema.sql`, verify the `DB` binding, inspect logs. |
@@ -2142,15 +2203,15 @@ Do not seed production with private export files unless you have verified the co
 |---|---|
 | AI | The assistant is local retrieval, not an external LLM. It cannot reason beyond the knowledge bank and static patterns. |
 | Recordings | Cloud Recordings is account-wide, not batch-scoped. Students with page access can see the account's recording library. |
-| Broadcast | No server-side email delivery; the app opens the local mail client. |
+| Broadcast | In-app delivery only; email is a manual mail-client handoff, with no server-side sending. |
 | Webinars | Current Zoom account lacks the Webinar add-on; webinar routes fail and the Dashboard shows **Plan required**. |
 | Admin identity | One shared admin PIN; no per-mentor accounts, roles, or admin action audit log. |
 | Student session | No “remember this device” or multi-device option; a lost device requires sign-out/expiry/admin release. |
 | Attendance | No manual attendance override; attendance is derived from Zoom reports. |
 | Attendance windows | Zoom report requests are limited to one month; roster windows can be larger but are built from reports. |
 | Q&A | No delete/export action in the UI; entries remain in the database. |
-| Reference Hub | Materials are global, not per batch. |
-| Notifications | No push, SMS, or automated email notifications. |
+| Reference Hub | Materials (including PDFs) are global, not per batch. PDFs are stored in D1 in 256 KB chunks, so total storage is bounded by the D1 plan. |
+| Notifications | In-app announcements only; no push, SMS, or automated email notifications. |
 | Mobile | Responsive web UI, but no native mobile app. |
 | Payments/certificates | No payments, invoicing, certificates, exams, or assignments. |
 | Recording control | The app does not start/stop Zoom recording; configure it in Zoom. |

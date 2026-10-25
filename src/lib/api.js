@@ -82,6 +82,37 @@ export const api = {
   put: (path, body) => request(path, { method: 'PUT', body }),
   patch: (path, body) => request(path, { method: 'PATCH', body }),
   del: (path) => request(path, { method: 'DELETE' }),
+  /**
+   * Download a binary response (e.g. a stored PDF) with the bearer token.
+   * Opening `/api/...` in a new tab cannot send the Authorization header, so
+   * callers turn the returned blob into an object URL instead.
+   */
+  file: async (path) => {
+    const token = getToken();
+    let res;
+    try {
+      res = await fetch(`/api${path}`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    } catch {
+      throw new Error('Cannot reach the local API proxy. Is `npm run dev:api` running on port 8787?');
+    }
+    if (res.status === 401 && token) {
+      setToken('');
+      window.dispatchEvent(new Event('sbc:signout'));
+    }
+    if (!res.ok) {
+      let message = `Request failed with status ${res.status}`;
+      try {
+        const data = JSON.parse(await res.text());
+        message = data?.error?.message || data?.message || message;
+      } catch {
+        /* keep the status message */
+      }
+      throw new Error(message);
+    }
+    return res.blob();
+  },
 };
 
 export default api;

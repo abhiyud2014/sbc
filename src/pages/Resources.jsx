@@ -3,11 +3,14 @@ import {
   BookMarked,
   Bookmark,
   ExternalLink,
+  FileText,
   Pencil,
   Plus,
   Search,
   Trash2,
   RefreshCw,
+  Upload,
+  X,
 } from 'lucide-react';
 import { api } from '../lib/api.js';
 import { useApi } from '../hooks/useApi.js';
@@ -21,6 +24,19 @@ const LEVELS = ['Beginner', 'Intermediate', 'Advanced'];
 const TYPES = ['Reference Guide', 'Concept Guide', 'API Reference', 'Worksheet', 'Practice Tool', 'Video Recording'];
 
 const EMPTY_FORM = { title: '', url: '', category: 'Beginner', type: 'Reference Guide', description: '' };
+const PDF_MAX_BYTES = 8 * 1024 * 1024;
+const formatBytes = (bytes) => {
+  const n = Number(bytes) || 0;
+  if (n < 1024 * 1024) return `${Math.max(1, Math.round(n / 1024))} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+};
+const readFileAsDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(new Error(`Could not read “${file.name}”.`));
+    reader.readAsDataURL(file);
+  });
 
 /**
  * Reference Hub — materials are stored server-side (materials.json) so admin
@@ -36,6 +52,9 @@ export default function Resources({ canEdit = true }) {
   const [level, setLevel] = useState('All');
   const [modal, setModal] = useState(null); // null | 'new' | material object being edited
   const [form, setForm] = useState(EMPTY_FORM);
+  const [files, setFiles] = useState([]); // PDFs already saved on the material
+  const [newFiles, setNewFiles] = useState([]); // File objects waiting for save
+  const [uploadStep, setUploadStep] = useState('');
   const [deleting, setDeleting] = useState(null);
   const [pending, run] = usePending();
 
@@ -53,6 +72,9 @@ export default function Resources({ canEdit = true }) {
 
   const openNew = () => {
     setForm(EMPTY_FORM);
+    setFiles([]);
+    setNewFiles([]);
+    setUploadStep('');
     setModal('new');
   };
 
@@ -64,22 +86,80 @@ export default function Resources({ canEdit = true }) {
       type: material.type || 'Reference Guide',
       description: material.description || '',
     });
+    setFiles(material.files || []);
+    setNewFiles([]);
+    setUploadStep('');
     setModal(material);
+  };
+
+  const pickFiles = (event) => {
+    const picked = [...(event.target.files || [])];
+    event.target.value = ''; // allow re-picking the same file after removing it
+    const accepted = [];
+    for (const file of picked) {
+      const isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+      if (!isPdf) {
+        showToast(`“${file.name}” is not a PDF. Only PDF documents can be uploaded.`, 'Not a PDF', 'error');
+        continue;
+      }
+      if (file.size > PDF_MAX_BYTES) {
+        showToast(`“${file.name}” is ${formatBytes(file.size)} — the limit is 8 MB per PDF.`, 'File too large', 'error');
+        continue;
+      }
+      if (newFiles.some((f) => f.name === file.name && f.size === file.size)) continue;
+      accepted.push(file);
+    }
+    if (accepted.length) setNewFiles((current) => [...current, ...accepted]);
+  };
+
+  const removeSavedFile = async (material, file) => {
+    try {
+      const updated = await run(() => api.del(`/materials/${material.id}/files/${file.id}`));
+      setFiles(updated.files || []);
+      materials.refresh();
+      showToast(`“${file.name}” removed from this material.`, 'PDF removed');
+    } catch (err) {
+      showToast(err.message, 'Could not remove the PDF', 'error');
+    }
   };
 
   const save = async (e) => {
     e.preventDefault();
     try {
+      let saved;
       if (modal === 'new') {
-        await run(() => api.post('/materials', form));
+        saved = await run(() => api.post('/materials', form));
+        // If a PDF upload fails below, retrying now PATCHes this material
+        // instead of creating a duplicate.
+        setModal(saved);
         showToast(`“${form.title}” added to the hub.`, 'Material added');
       } else {
-        await run(() => api.patch(`/materials/${modal.id}`, form));
+        saved = await run(() => api.patch(`/materials/${modal.id}`, form));
         showToast(`“${form.title}” updated.`, 'Material saved');
       }
+
+      // Upload sequentially: one PDF per request keeps each body small and
+      // gives a clear progress label. Successfully uploaded files leave the
+      // pending list, so a retry after a failure never duplicates them.
+      const remaining = [...newFiles];
+      const total = remaining.length;
+      while (remaining.length) {
+        const file = remaining[0];
+        setUploadStep(`Uploading PDF ${total - remaining.length + 1} of ${total}…`);
+        const data = await readFileAsDataUrl(file);
+        await api.post(`/materials/${saved.id}/files`, {
+          files: [{ name: file.name, type: 'application/pdf', data }],
+        });
+        remaining.shift();
+        setNewFiles([...remaining]);
+      }
+      setUploadStep('');
+
       setModal(null);
+      setNewFiles([]);
       materials.refresh();
     } catch (err) {
+      setUploadStep('');
       showToast(err.message, 'Could not save', 'error');
     }
   };
@@ -95,16 +175,38 @@ export default function Resources({ canEdit = true }) {
     }
   };
 
+  // Open a stored PDF through the authenticated API. The file route needs the
+  // bearer token, so a plain <a href> would 401 — fetch a blob and open it.
+  const openPdf = async (materialId, file) => {
+    const tab = window.open('', '_blank');
+    if (tab) tab.opener = null;
+    try {
+      const blob = await api.file(`/materials/${materialId}/files/${file.id}`);
+      const url = URL.createObjectURL(blob);
+      if (tab) tab.location.href = url;
+      else window.open(url, '_blank');
+      // Keep the object URL alive long enough for the viewer to load it.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      tab?.close();
+      showToast(err.message, 'Could not open the PDF', 'error');
+    }
+  };
+
   const openMaterial = (r) => {
-    if (!r.url) {
-      showToast(
-        canEdit ? 'This material has no link yet — add one with Edit.' : 'Ask your mentor to add a link for this material.',
-        'No URL set',
-        'info'
-      );
+    if (r.url) {
+      window.open(r.url, '_blank', 'noopener,noreferrer');
       return;
     }
-    window.open(r.url, '_blank', 'noopener,noreferrer');
+    if (r.files?.[0]) {
+      openPdf(r.id, r.files[0]);
+      return;
+    }
+    showToast(
+      canEdit ? 'This material has no PDF or link yet — add one with Edit.' : 'Ask your mentor to add a PDF or link for this material.',
+      'Nothing to open',
+      'info'
+    );
   };
 
   const input =
@@ -220,15 +322,39 @@ export default function Resources({ canEdit = true }) {
                 {r.description ? (
                   <p className="text-xs leading-relaxed text-slate-400">{r.description}</p>
                 ) : null}
+
+                {(r.files || []).length ? (
+                  <ul className="mt-3 space-y-1.5">
+                    {(r.files || []).map((file) => (
+                      <li key={file.id}>
+                        <button
+                          type="button"
+                          onClick={() => openPdf(r.id, file)}
+                          className="flex w-full items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 text-left text-[11px] text-slate-300 transition hover:border-slate-700 hover:text-white"
+                          title={`Open ${file.name}`}
+                        >
+                          <FileText size={12} className="shrink-0 text-red-400" />
+                          <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                          <span className="shrink-0 text-[10px] text-slate-500">{formatBytes(file.size)}</span>
+                          <ExternalLink size={10} className="shrink-0 text-slate-500" />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
               </div>
 
               <div className="mt-4 flex items-center justify-between gap-2 border-t border-slate-800 pt-4">
                 <span className="truncate text-[11px] text-slate-500" title={r.url || 'No link set'}>
-                  {r.url ? r.url.replace(/^https?:\/\//, '').slice(0, 32) : 'No link set'}
+                  {(r.files || []).length
+                    ? `${r.files.length} PDF${r.files.length === 1 ? '' : 's'}${r.url ? ' · link' : ''}`
+                    : r.url
+                      ? r.url.replace(/^https?:\/\//, '').slice(0, 32)
+                      : 'No link set'}
                 </span>
                 <button
                   onClick={() => openMaterial(r)}
-                  disabled={!r.url}
+                  disabled={!r.url && !(r.files || []).length}
                   className="flex shrink-0 items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-1.5 text-xs font-bold text-slate-200 transition hover:bg-slate-700 disabled:opacity-40"
                 >
                   <ExternalLink size={12} /> Open
@@ -271,7 +397,95 @@ export default function Resources({ canEdit = true }) {
               className={input}
             />
             <p className="mt-1 text-[11px] text-slate-500">
-              The “Open” button opens this URL in a new tab. Leave blank for a placeholder.
+              Optional. Upload PDFs below and/or point to an external page — the “Open” button prefers the link,
+              then the first PDF.
+            </p>
+          </div>
+
+          <div>
+            <label className={label} htmlFor="mat-files">PDF documents</label>
+            <label
+              htmlFor="mat-files"
+              className="flex cursor-pointer flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-600 bg-slate-900/60 px-4 py-4 text-center transition hover:border-accent-emerald/60 hover:bg-slate-900"
+            >
+              <Upload size={16} className="text-accent-emerald" />
+              <span className="text-xs font-semibold text-slate-200">
+                Choose one or more PDFs
+              </span>
+              <span className="text-[10px] text-slate-500">Up to 8 MB each · .pdf only</span>
+            </label>
+            <input
+              id="mat-files"
+              type="file"
+              accept="application/pdf,.pdf"
+              multiple
+              onChange={pickFiles}
+              className="sr-only"
+            />
+
+            {files.length ? (
+              <ul className="mt-2 space-y-1.5">
+                {files.map((file) => (
+                  <li
+                    key={file.id}
+                    className="flex items-center gap-2 rounded-lg border border-slate-800 bg-slate-900/60 px-2.5 py-1.5 text-[11px] text-slate-300"
+                  >
+                    <FileText size={12} className="shrink-0 text-red-400" />
+                    <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                    <span className="shrink-0 text-[10px] text-slate-500">{formatBytes(file.size)}</span>
+                    <button
+                      type="button"
+                      onClick={() => openPdf(modal.id, file)}
+                      className="shrink-0 text-slate-400 transition hover:text-white"
+                      title="Open PDF"
+                    >
+                      <ExternalLink size={11} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removeSavedFile(modal, file)}
+                      disabled={pending}
+                      className="shrink-0 text-slate-500 transition hover:text-red-400 disabled:opacity-40"
+                      title="Remove PDF"
+                    >
+                      <X size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            {newFiles.length ? (
+              <ul className="mt-2 space-y-1.5">
+                {newFiles.map((file, index) => (
+                  <li
+                    key={`${file.name}-${file.size}-${index}`}
+                    className="flex items-center gap-2 rounded-lg border border-accent-emerald/20 bg-accent-emerald/5 px-2.5 py-1.5 text-[11px] text-slate-200"
+                  >
+                    <FileText size={12} className="shrink-0 text-accent-emerald" />
+                    <span className="min-w-0 flex-1 truncate">{file.name}</span>
+                    <span className="shrink-0 text-[10px] text-slate-500">{formatBytes(file.size)}</span>
+                    <span className="shrink-0 rounded bg-accent-emerald/15 px-1 py-px text-[9px] font-bold text-accent-emerald">
+                      NEW
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setNewFiles((current) => current.filter((_, i) => i !== index))}
+                      disabled={pending}
+                      className="shrink-0 text-slate-500 transition hover:text-red-400 disabled:opacity-40"
+                      title="Remove from this upload"
+                    >
+                      <X size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+
+            <p className="mt-1.5 text-[11px] text-slate-500">
+              {files.length || newFiles.length
+                ? `${files.length + newFiles.length} PDF${files.length + newFiles.length === 1 ? '' : 's'} attached — students can open them from the Reference Hub.`
+                : 'Students see each PDF as an openable card link.'}
             </p>
           </div>
 
@@ -325,7 +539,15 @@ export default function Resources({ canEdit = true }) {
               disabled={pending}
               className="rounded-lg bg-accent-emerald px-5 py-2.5 text-xs font-bold text-slate-950 transition hover:bg-emerald-600 disabled:opacity-50"
             >
-              {pending ? 'Saving…' : modal === 'new' ? 'Add material' : 'Save changes'}
+              {pending
+                ? uploadStep || 'Saving…'
+                : modal === 'new'
+                  ? newFiles.length
+                    ? `Add material + ${newFiles.length} PDF${newFiles.length === 1 ? '' : 's'}`
+                    : 'Add material'
+                  : newFiles.length
+                    ? `Save + upload ${newFiles.length} PDF${newFiles.length === 1 ? '' : 's'}`
+                    : 'Save changes'}
             </button>
           </div>
         </form>

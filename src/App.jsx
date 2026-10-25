@@ -16,6 +16,7 @@ import Questions from './pages/Questions.jsx';
 import Resources from './pages/Resources.jsx';
 import Chatbot from './pages/Chatbot.jsx';
 import Broadcast from './components/Broadcast.jsx';
+import Announcements from './components/Announcements.jsx';
 
 const TITLES = {
   dashboard: {
@@ -69,6 +70,10 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scheduleSignal, setScheduleSignal] = useState(0);
   const [broadcastOpen, setBroadcastOpen] = useState(false);
+  // Student message centre: the modal + a "already auto-opened this session"
+  // flag so an announcement pops up once per sign-in, not on every poll.
+  const [announcementsOpen, setAnnouncementsOpen] = useState(false);
+  const [announcementsSeen, setAnnouncementsSeen] = useState(false);
 
   // Validate any stored token with the server (catches expiry/revocation).
   useEffect(() => {
@@ -119,8 +124,58 @@ export default function App() {
 
   // Enrolled students drive the admin's "view as" switcher (freshened when
   // its menu opens). Participants never call this (403 by design).
-  const students = useApi(() => api.get('/students'), [], { immediate: Boolean(session) });
+  const students = useApi(() => api.get('/students'), [], { immediate: Boolean(session) && isAdminSession });
   const studentList = useMemo(() => students.data?.students || [], [students.data]);
+
+  const isParticipantSession = Boolean(session) && !isAdminSession;
+
+  // In-app announcements (students only). The admin "view as" preview must not
+  // fetch them: opening the panel would mark a real student's message read.
+  const announcements = useApi(() => api.get('/announcements'), [], {
+    immediate: isParticipantSession,
+  });
+  const unreadCount = isParticipantSession ? announcements.data?.unread || 0 : 0;
+  const { setData: setAnnouncementData } = announcements;
+
+  useEffect(() => {
+    if (!isParticipantSession) return undefined;
+    const id = setInterval(() => announcements.refresh(), 60_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isParticipantSession]);
+
+  // A different sign-in starts with a clean slate, and no stale unread count
+  // from whoever used the browser before.
+  useEffect(() => {
+    setAnnouncementsSeen(false);
+    setAnnouncementsOpen(false);
+    setAnnouncementData(null);
+  }, [session?.user?.id, isAdminSession, setAnnouncementData]);
+
+  // Pop the message centre once per sign-in as soon as unread mail is known.
+  useEffect(() => {
+    if (!isParticipantSession || announcementsSeen || unreadCount === 0) return;
+    setAnnouncementsOpen(true);
+    setAnnouncementsSeen(true);
+  }, [isParticipantSession, announcementsSeen, unreadCount]);
+
+  const openAnnouncements = () => {
+    setAnnouncementsSeen(true);
+    setAnnouncementsOpen(true);
+    announcements.refresh();
+  };
+
+  // Dismissing the panel marks everything visible as read (badge → 0).
+  const closeAnnouncements = () => {
+    setAnnouncementsOpen(false);
+    if (!isParticipantSession || unreadCount === 0) return;
+    api
+      .post('/announcements/read-all', {})
+      .catch(() => {
+        /* the next poll refreshes the badge */
+      })
+      .finally(() => announcements.refresh());
+  };
 
   useEffect(() => {
     localStorage.setItem('sbc.viewer', previewId);
@@ -227,6 +282,8 @@ export default function App() {
           onSwitchRole={switchRole}
           onRefreshStudents={students.refresh}
           onSignOut={signOut}
+          unreadAnnouncements={unreadCount}
+          onOpenAnnouncements={openAnnouncements}
         />
 
         <main key={tab} className="fade-in flex-1 overflow-y-auto bg-dark-bg p-4 sm:p-6">
@@ -240,6 +297,15 @@ export default function App() {
       </div>
 
       <Broadcast open={broadcastOpen} onClose={() => setBroadcastOpen(false)} />
+
+      <Announcements
+        open={announcementsOpen}
+        onClose={closeAnnouncements}
+        data={announcements.data}
+        loading={announcements.loading}
+        error={announcements.error}
+        onRetry={announcements.refresh}
+      />
     </div>
   );
 }

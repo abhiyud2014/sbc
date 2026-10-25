@@ -61,6 +61,15 @@ const messageRowToApi = (row) => ({
   ...(row.corrected ? { corrected: true } : {}),
 });
 
+const parseMaterialFiles = (raw) => {
+  try {
+    const list = JSON.parse(raw || '[]');
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+};
+
 const materialRowToApi = (row) => ({
   id: row.id,
   title: row.title,
@@ -69,6 +78,7 @@ const materialRowToApi = (row) => ({
   url: row.url || '',
   description: row.description || '',
   bookmarks: row.bookmarks || 0,
+  files: parseMaterialFiles(row.files),
 });
 
 function hashWithCost(plain, cost = 16384) {
@@ -724,8 +734,129 @@ export function createD1Repos(db) {
       return materials.get(id);
     },
 
+    async setFiles(id, files = []) {
+      await run(
+        'UPDATE materials SET files = ?, updated_at = ? WHERE id = ?',
+        JSON.stringify(files),
+        new Date().toISOString(),
+        String(id)
+      );
+      return materials.get(id);
+    },
+
     async remove(id) {
       return (await run('DELETE FROM materials WHERE id = ?', String(id))) > 0;
+    },
+  };
+
+  /* --------------------------- material files --------------------------- */
+
+  const materialFiles = {
+    async putChunks(fileId, chunks = []) {
+      const statements = [stmt('DELETE FROM material_file_chunks WHERE file_id = ?', String(fileId))];
+      chunks.forEach((chunk, index) => {
+        statements.push(
+          stmt(
+            'INSERT INTO material_file_chunks (file_id, chunk_index, data) VALUES (?, ?, ?)',
+            String(fileId),
+            index,
+            chunk
+          )
+        );
+      });
+      await batch(statements);
+    },
+
+    async readChunks(fileId) {
+      const rows = await all(
+        'SELECT data FROM material_file_chunks WHERE file_id = ? ORDER BY chunk_index',
+        String(fileId)
+      );
+      return rows.map((row) => row.data);
+    },
+
+    async remove(fileId) {
+      return (await run('DELETE FROM material_file_chunks WHERE file_id = ?', String(fileId))) > 0;
+    },
+
+    async removeMany(fileIds = []) {
+      if (!fileIds.length) return 0;
+      const placeholders = fileIds.map(() => '?').join(',');
+      return run(
+        `DELETE FROM material_file_chunks WHERE file_id IN (${placeholders})`,
+        ...fileIds.map(String)
+      );
+    },
+  };
+
+  /* ---------------------------- announcements --------------------------- */
+
+  const announcementRowToApi = (row) => ({
+    id: row.id,
+    subject: row.subject || '',
+    body: row.body,
+    createdBy: row.created_by || '',
+    createdAt: row.created_at || '',
+    ...(row.read_at === undefined ? {} : { read: Boolean(row.read_at), readAt: row.read_at || null }),
+  });
+
+  const announcements = {
+    async list() {
+      return (await all('SELECT * FROM announcements ORDER BY created_at DESC, id DESC')).map(
+        announcementRowToApi
+      );
+    },
+
+    async get(id) {
+      const row = await first('SELECT * FROM announcements WHERE id = ?', String(id || ''));
+      return row ? announcementRowToApi(row) : null;
+    },
+
+    async create(data) {
+      await run(
+        'INSERT INTO announcements (id, subject, body, created_by, created_at) VALUES (?, ?, ?, ?, ?)',
+        data.id,
+        String(data.subject || ''),
+        String(data.body || ''),
+        String(data.createdBy || ''),
+        data.createdAt || new Date().toISOString()
+      );
+      return announcements.get(data.id);
+    },
+
+    async forStudent(studentId, since = '') {
+      const rows = await all(
+        `SELECT a.*, r.read_at
+           FROM announcements a
+           LEFT JOIN announcement_reads r
+             ON r.announcement_id = a.id AND r.student_id = ?
+          WHERE (? = '' OR a.created_at >= ?)
+          ORDER BY a.created_at DESC, a.id DESC`,
+        String(studentId),
+        String(since || ''),
+        String(since || '')
+      );
+      return rows.map(announcementRowToApi);
+    },
+
+    async markRead(studentId, ids = []) {
+      if (!ids.length) return 0;
+      const at = new Date().toISOString();
+      const statements = ids.map((id) =>
+        stmt(
+          'INSERT OR IGNORE INTO announcement_reads (announcement_id, student_id, read_at) VALUES (?, ?, ?)',
+          String(id),
+          String(studentId),
+          at
+        )
+      );
+      const results = await batch(statements);
+      return results.reduce((sum, r) => sum + Number(r?.meta?.changes ?? 0), 0);
+    },
+
+    async remove(id) {
+      await run('DELETE FROM announcement_reads WHERE announcement_id = ?', String(id));
+      return (await run('DELETE FROM announcements WHERE id = ?', String(id))) > 0;
     },
   };
 
@@ -904,5 +1035,5 @@ export function createD1Repos(db) {
     },
   };
 
-  return { students, batches, targets, questions, knowledge, chats, materials, auth };
+  return { students, batches, targets, questions, knowledge, chats, materials, materialFiles, announcements, auth };
 }
