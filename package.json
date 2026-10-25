@@ -1,0 +1,45 @@
+{
+  "name": "sbc-lms-zoom-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "SBC-LMS dashboard (React + Vite + Tailwind) with a Zoom Server-to-Server OAuth API proxy",
+  "scripts": {
+    "dev": "concurrently -n web,api -c cyan,magenta \"npm:dev:web\" \"npm:dev:api\"",
+    "dev:web": "vite",
+    "dev:api": "node server/index.js",
+    "db:import": "node server/import-json.js",
+    "db:export": "node scripts/export-d1-seed.mjs",
+    "admin:pin": "node scripts/rotate-admin-pin.mjs",
+    "db:schema:local": "wrangler d1 execute sbc-lms --local --file=worker/schema.sql",
+    "db:schema:remote": "wrangler d1 execute sbc-lms --remote --file=worker/schema.sql",
+    "db:seed:local": "wrangler d1 execute sbc-lms --local --file=worker/seed.sql",
+    "db:seed:remote": "wrangler d1 execute sbc-lms --remote --file=worker/seed.sql",
+    "worker:dev": "wrangler dev",
+    "worker:deploy": "wrangler deploy",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "start": "node server/index.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.7",
+    "express": "^5.3.0",
+    "lucide-react": "^1.55.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@testing-library/dom": "^10.4.2",
+    "@testing-library/react": "^16.3.3",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "jsdom": "^27.0.1",
+    "tailwindcss": "^4.3.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.4",
+    "wrangler": "^4.151.3"
+  }
+}

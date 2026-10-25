@@ -1,0 +1,951 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Apex Trading Academy - LMS & Dashboard</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        darkBg: '#0b0f19',
+                        cardBg: '#131c2e',
+                        cardHover: '#1e293b',
+                        accentEmerald: '#10b981',
+                        accentBlue: '#3b82f6',
+                        accentCyan: '#06b6d4',
+                        accentRed: '#ef4444',
+                        borderSlate: '#1e293b'
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0b0f19; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 15px rgba(16, 185, 129, 0.2); }
+            50% { box-shadow: 0 0 25px rgba(16, 185, 129, 0.4); }
+        }
+        .live-glow { animation: pulse-glow 2.5s infinite; }
+    </style>
+</head>
+<body class="bg-darkBg text-slate-100 min-h-screen flex flex-col antialiased selection:bg-accentEmerald selection:text-black">
+
+    <div id="app" class="flex h-screen overflow-hidden">
+        
+        <!-- Sidebar Navigation -->
+        <aside id="sidebar" class="w-64 bg-cardBg border-r border-slate-800 flex flex-col z-20 transition-all duration-300 -translate-x-full md:translate-x-0 fixed md:static inset-y-0 left-0">
+            <!-- Brand Header -->
+            <div class="p-5 border-b border-slate-800 flex items-center justify-between">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-accentEmerald to-accentBlue flex items-center justify-center text-slate-950 font-black text-xl shadow-lg">
+                        <i class="fa-solid fa-chart-line"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-bold text-base tracking-tight text-white">Apex Trading</h1>
+                        <p class="text-xs text-accentEmerald font-medium">Pro Institution LMS</p>
+                    </div>
+                </div>
+                <button onclick="toggleSidebar()" class="md:hidden text-slate-400 hover:text-white">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Navigation Links -->
+            <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto">
+                <p class="px-3 text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Main Menu</p>
+                
+                <button onclick="switchTab('dashboard')" id="nav-dashboard" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-3 rounded-xl text-sm font-medium transition-colors bg-accentEmerald/10 text-accentEmerald border border-accentEmerald/20">
+                    <i class="fa-solid fa-gauge-high w-5 text-center"></i>
+                    <span>Dashboard</span>
+                </button>
+
+                <button onclick="switchTab('schedule')" id="nav-schedule" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-3 rounded-xl text-sm font-medium text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-video w-5 text-center"></i>
+                    <span>Zoom Sessions</span>
+                    <span class="ml-auto bg-accentBlue/20 text-accentBlue text-xs px-2 py-0.5 rounded-full font-bold">Pro</span>
+                </button>
+
+                <button onclick="switchTab('chatbot')" id="nav-chatbot" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-3 rounded-xl text-sm font-medium text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-robot w-5 text-center"></i>
+                    <span>AI Knowledge Bot</span>
+                    <span class="ml-auto bg-accentEmerald/20 text-accentEmerald text-xs px-2 py-0.5 rounded-full font-bold">Live</span>
+                </button>
+
+                <button onclick="switchTab('resources')" id="nav-resources" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-3 rounded-xl text-sm font-medium text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-book-bookmark w-5 text-center"></i>
+                    <span>Reference Hub</span>
+                </button>
+
+                <button onclick="switchTab('students')" id="nav-students" class="nav-btn w-full flex items-center space-x-3 px-3.5 py-3 rounded-xl text-sm font-medium text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors">
+                    <i class="fa-solid fa-users-rectangle w-5 text-center"></i>
+                    <span>Student Roster</span>
+                </button>
+            </nav>
+
+            <!-- Institution Status Footer -->
+            <div class="p-4 border-t border-slate-800 m-4 rounded-xl bg-slate-900/50 border border-slate-800">
+                <div class="flex items-center justify-between mb-2">
+                    <span class="text-xs text-slate-400">Zoom Pro License</span>
+                    <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Active</span>
+                </div>
+                <div class="flex items-center space-x-2 text-xs text-slate-300">
+                    <i class="fa-solid fa-server text-accentEmerald"></i>
+                    <span>Server: US-East (Ultra-low latency)</span>
+                </div>
+            </div>
+        </aside>
+
+        <div class="flex-1 flex flex-col min-w-0 overflow-hidden">
+            <!-- Top Navbar -->
+            <header class="bg-cardBg border-b border-slate-800 h-16 flex items-center justify-between px-6 z-10">
+                <div class="flex items-center space-x-4">
+                    <button onclick="toggleSidebar()" class="md:hidden text-slate-400 hover:text-white text-lg">
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                    <div>
+                        <h2 id="page-title" class="text-lg font-bold text-white">Dashboard Overview</h2>
+                        <p id="page-subtitle" class="text-xs text-slate-400">Welcome back, Head Mentor. Here is your institution's live overview.</p>
+                    </div>
+                </div>
+
+                <!-- Right Actions -->
+                <div class="flex items-center space-x-3">
+                    <button onclick="openModal('announcementModal')" class="hidden sm:flex items-center space-x-2 bg-slate-800 hover:bg-slate-700 text-slate-200 px-3 py-2 rounded-lg text-xs font-semibold transition border border-slate-700">
+                        <i class="fa-solid fa-bullhorn text-accentBlue"></i>
+                        <span>Broadcast</span>
+                    </button>
+                    <button onclick="openModal('scheduleModal')" class="flex items-center space-x-2 bg-accentEmerald hover:bg-emerald-600 text-slate-950 px-3.5 py-2 rounded-lg text-xs font-bold transition shadow-lg shadow-emerald-900/20">
+                        <i class="fa-solid fa-plus"></i>
+                        <span>Schedule Zoom</span>
+                    </button>
+
+                    <!-- User Profile Dropdown Sim -->
+                    <div class="flex items-center space-x-3 pl-3 border-l border-slate-800">
+                        <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-accentBlue to-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow">
+                            HM
+                        </div>
+                        <div class="hidden lg:block text-left">
+                            <p class="text-xs font-bold text-white">Dr. Alex Vance</p>
+                            <p class="text-[10px] text-slate-400">Chief Trading Mentor</p>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Main Scrollable Area -->
+            <main id="main-content" class="flex-1 overflow-y-auto bg-darkBg p-6">
+                <!-- Content injected dynamically based on active tab -->
+            </main>
+        </div>
+    </div>
+
+    <!-- Schedule Zoom Modal -->
+    <div id="scheduleModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-cardBg border border-slate-700 w-full max-w-lg rounded-2xl p-6 shadow-2xl relative">
+            <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+                <h3 class="text-base font-bold text-white flex items-center space-x-2">
+                    <i class="fa-solid fa-video text-accentBlue"></i>
+                    <span>Schedule New Zoom Pro Session</span>
+                </h3>
+                <button onclick="closeModal('scheduleModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form id="scheduleForm" onsubmit="handleScheduleSubmit(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-1">Session Title</label>
+                    <input type="text" id="sessionTitle" required placeholder="e.g. Advanced Order Flow & DOM Tactics" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-accentEmerald">
+                </div>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">Category / Level</label>
+                        <select id="sessionCategory" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-accentEmerald">
+                            <option value="Beginner">Beginner Basics</option>
+                            <option value="Intermediate">Intermediate Strategy</option>
+                            <option value="Advanced">Advanced Pro Masterclass</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1">Date & Time</label>
+                        <input type="datetime-local" id="sessionTime" required class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-accentEmerald">
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-1">Zoom Meeting ID / Link (Pro)</label>
+                    <input type="text" id="zoomLink" value="https://zoom.us/j/8924019284?pwd=apex_pro_secure" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-accentEmerald">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-1">Brief Description</label>
+                    <textarea id="sessionDesc" rows="3" placeholder="Key topics covered in this webinar..." class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-accentEmerald"></textarea>
+                </div>
+                <div class="flex justify-end space-x-3 pt-4 border-t border-slate-800">
+                    <button type="button" onclick="closeModal('scheduleModal')" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition">Cancel</button>
+                    <button type="submit" class="px-5 py-2 bg-accentEmerald hover:bg-emerald-600 text-slate-950 text-xs font-bold rounded-lg transition shadow-lg shadow-emerald-900/30">Create & Notify Cohort</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Broadcast Announcement Modal -->
+    <div id="announcementModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-cardBg border border-slate-700 w-full max-w-md rounded-2xl p-6 shadow-2xl relative">
+            <div class="flex items-center justify-between pb-4 border-b border-slate-800 mb-4">
+                <h3 class="text-base font-bold text-white flex items-center space-x-2">
+                    <i class="fa-solid fa-bullhorn text-accentBlue"></i>
+                    <span>Broadcast Urgent Announcement</span>
+                </h3>
+                <button onclick="closeModal('announcementModal')" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="handleAnnouncementSubmit(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-1">Target Audience</label>
+                    <select class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-accentBlue">
+                        <option>All Enrolled Students (248 Active)</option>
+                        <option>Beginner Cohort (92 Students)</option>
+                        <option>Intermediate Cohort (85 Students)</option>
+                        <option>Professional / Advanced (71 Students)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-1">Message Title</label>
+                    <input type="text" id="annTitle" required placeholder="e.g. Market Alert: FOMC Rate Decision Today" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-accentBlue">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-slate-300 mb-1">Announcement Details</label>
+                    <textarea id="annContent" rows="4" required placeholder="Write your urgent message here..." class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-accentBlue"></textarea>
+                </div>
+                <div class="flex justify-end space-x-3 pt-4 border-t border-slate-800">
+                    <button type="button" onclick="closeModal('announcementModal')" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-lg transition">Cancel</button>
+                    <button type="submit" class="px-5 py-2 bg-accentBlue hover:bg-blue-600 text-white text-xs font-bold rounded-lg transition shadow-lg shadow-blue-900/30">Send Broadcast Now</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast" class="fixed bottom-6 right-6 z-50 transform translate-y-24 opacity-0 transition-all duration-300 bg-cardBg border border-emerald-500/40 text-white px-4 py-3 rounded-xl shadow-2xl flex items-center space-x-3">
+        <div class="w-8 h-8 rounded-lg bg-emerald-500/20 text-accentEmerald flex items-center justify-center font-bold">
+            <i class="fa-solid fa-check"></i>
+        </div>
+        <div>
+            <p id="toast-title" class="text-xs font-bold text-white">Success Action</p>
+            <p id="toast-msg" class="text-[11px] text-slate-400">Operation completed successfully.</p>
+        </div>
+    </div>
+
+    <script>
+        // Application State Data
+        const state = {
+            currentTab: 'dashboard',
+            chatbotMode: 'session', // 'session' or 'offline'
+            sessions: [
+                { id: 1, title: 'Price Action & Support/Resistance Mastery', category: 'Beginner', time: '2026-10-11T18:00', zoomId: '892-401-9284', status: 'Live Soon', mentor: 'Dr. Alex Vance', attendees: 84 },
+                { id: 2, title: 'Advanced Options Greeks & Delta Hedging', category: 'Advanced', time: '2026-10-12T20:00', zoomId: '541-902-3321', status: 'Scheduled', mentor: 'Sarah Jenkins', attendees: 62 },
+                { id: 3, title: 'Risk Management 101: Position Sizing Calculator', category: 'Beginner', time: '2026-10-14T17:30', zoomId: '772-109-8834', status: 'Scheduled', mentor: 'Marcus Sterling', attendees: 90 },
+                { id: 4, title: 'Order Flow & DOM Footprint Charts Workshop', category: 'Intermediate', time: '2026-10-09T19:00', zoomId: '334-928-1102', status: 'Recorded', recordingUrl: '#recording-1', mentor: 'Dr. Alex Vance', attendees: 75 }
+            ],
+            resources: [
+                { id: 1, title: 'Ultimate Candlestick Pattern Cheat Sheet', category: 'Beginner', type: 'PDF Guide', downloads: 1420, bookmarked: true },
+                { id: 2, title: 'MACD & RSI Divergence Master Guide', category: 'Intermediate', type: 'PDF Guide', downloads: 980, bookmarked: false },
+                { id: 3, title: 'Prop Firm Challenge Blueprint & Rules', category: 'Advanced', type: 'Strategy Playbook', downloads: 2150, bookmarked: true },
+                { id: 4, title: 'Python Automated Trading Bot Starter Kit', category: 'Advanced', type: 'Code / Indicator', downloads: 640, bookmarked: false },
+                { id: 5, title: 'Psychology of Trading: Controlling FOMO & Greed', category: 'Beginner', type: 'Video Recording', downloads: 1890, bookmarked: false }
+            ],
+            students: [
+                { id: 101, name: 'Liam Chen', background: 'Complete Beginner (IT Engineer)', level: 'Beginner', attendance: '92%', progress: '78%', status: 'Active' },
+                { id: 102, name: 'Elena Rostova', background: 'Intermediate Forex Trader', level: 'Intermediate', attendance: '100%', progress: '94%', status: 'Active' },
+                { id: 103, name: 'David Miller', background: 'Ex-Banker / Options Enthusiast', level: 'Advanced', attendance: '88%', progress: '85%', status: 'Active' },
+                { id: 104, name: 'Aisha Patel', background: 'Retail Swing Trader', level: 'Beginner', attendance: '75%', progress: '60%', status: 'At Risk' },
+                { id: 105, name: 'Carlos Gomez', background: 'Crypto Day Trader transitioning to Equities', level: 'Intermediate', attendance: '95%', progress: '89%', status: 'Active' }
+            ],
+            chatMessages: [
+                { sender: 'bot', text: 'Welcome to Apex Trading Assistant! I am trained on our proprietary knowledge-base (Risk Rules, Technical Indicators, Zoom Webinar Archives). How can I assist your trading session today?', time: '12:00 PM' }
+            ]
+        };
+
+        // Tab Switcher
+        function switchTab(tabId) {
+            state.currentTab = tabId;
+            document.querySelectorAll('.nav-btn').forEach(btn => {
+                btn.className = "nav-btn w-full flex items-center space-x-3 px-3.5 py-3 rounded-xl text-sm font-medium text-slate-400 hover:bg-slate-800/60 hover:text-slate-200 transition-colors";
+            });
+            const activeBtn = document.getElementById(`nav-${tabId}`);
+            if (activeBtn) {
+                activeBtn.className = "nav-btn w-full flex items-center space-x-3 px-3.5 py-3 rounded-xl text-sm font-medium bg-accentEmerald/10 text-accentEmerald border border-accentEmerald/20";
+            }
+
+            // Update titles
+            const titles = {
+                dashboard: { title: 'Dashboard Overview', subtitle: 'Institution key metrics, upcoming Zoom sessions & live activity.' },
+                schedule: { title: 'Zoom Sessions & Calendar', subtitle: 'Manage virtual classes, pro webinar links, and recordings.' },
+                chatbot: { title: 'AI Knowledge-Base & Live Chat', subtitle: 'Dual-mode interactive assistant for real-time webinars and self-paced study.' },
+                resources: { title: 'Reference Hub & Materials', subtitle: 'Curated trading guides, cheat sheets, indicators, and playbooks.' },
+                students: { title: 'Student Roster & Cohort Management', subtitle: 'Track student backgrounds, experience levels, attendance, and progress.' }
+            };
+
+            document.getElementById('page-title').innerText = titles[tabId].title;
+            document.getElementById('page-subtitle').innerText = titles[tabId].subtitle;
+
+            renderContent();
+            if (tabId === 'chatbot') {
+                scrollToBottomChat();
+            }
+        }
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            sidebar.classList.toggle('-translate-x-full');
+        }
+
+        // Render Content Switcher
+        function renderContent() {
+            const container = document.getElementById('main-content');
+            if (state.currentTab === 'dashboard') {
+                container.innerHTML = renderDashboardHTML();
+            } else if (state.currentTab === 'schedule') {
+                container.innerHTML = renderScheduleHTML();
+            } else if (state.currentTab === 'chatbot') {
+                container.innerHTML = renderChatbotHTML();
+            } else if (state.currentTab === 'resources') {
+                container.innerHTML = renderResourcesHTML();
+            } else if (state.currentTab === 'students') {
+                container.innerHTML = renderStudentsHTML();
+            }
+        }
+
+        function renderDashboardHTML() {
+            return `
+                <div class="space-y-6">
+                    <!-- Stat Cards Row -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+                        <div class="bg-cardBg border border-slate-800 rounded-2xl p-5 relative overflow-hidden shadow-lg">
+                            <div class="flex items-center justify-between mb-3">
+                                <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Active Students</span>
+                                <div class="w-10 h-10 rounded-xl bg-accentEmerald/10 text-accentEmerald flex items-center justify-center font-bold">
+                                    <i class="fa-solid fa-users"></i>
+                                </div>
+                            </div>
+                            <div class="flex items-baseline space-x-2">
+                                <span class="text-3xl font-extrabold text-white">248</span>
+                                <span class="text-xs text-accentEmerald font-bold flex items-center"><i class="fa-solid fa-arrow-trend-up mr-1"></i>+12% this month</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 mt-2">Across Beginner, Intermediate & Pro cohorts</p>
+                            <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-accentEmerald to-transparent"></div>
+                        </div>
+
+                        <div class="bg-cardBg border border-slate-800 rounded-2xl p-5 relative overflow-hidden shadow-lg">
+                            <div class="flex items-center justify-between mb-3">
+                                <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Upcoming Zoom Pro</span>
+                                <div class="w-10 h-10 rounded-xl bg-accentBlue/10 text-accentBlue flex items-center justify-center font-bold">
+                                    <i class="fa-solid fa-video"></i>
+                                </div>
+                            </div>
+                            <div class="flex items-baseline space-x-2">
+                                <span class="text-3xl font-extrabold text-white">3</span>
+                                <span class="text-xs text-accentBlue font-bold">Next in 42 mins</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 mt-2">Session: Price Action & Support/Resistance</p>
+                            <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-accentBlue to-transparent"></div>
+                        </div>
+
+                        <div class="bg-cardBg border border-slate-800 rounded-2xl p-5 relative overflow-hidden shadow-lg">
+                            <div class="flex items-center justify-between mb-3">
+                                <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Avg Course Completion</span>
+                                <div class="w-10 h-10 rounded-xl bg-accentCyan/10 text-accentCyan flex items-center justify-center font-bold">
+                                    <i class="fa-solid fa-graduation-cap"></i>
+                                </div>
+                            </div>
+                            <div class="flex items-baseline space-x-2">
+                                <span class="text-3xl font-extrabold text-white">84.2%</span>
+                                <span class="text-xs text-accentCyan font-bold flex items-center"><i class="fa-solid fa-arrow-trend-up mr-1"></i>+4.5%</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 mt-2">High engagement in risk management modules</p>
+                            <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-accentCyan to-transparent"></div>
+                        </div>
+
+                        <div class="bg-cardBg border border-slate-800 rounded-2xl p-5 relative overflow-hidden shadow-lg">
+                            <div class="flex items-center justify-between mb-3">
+                                <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Knowledge-Base Q&A</span>
+                                <div class="w-10 h-10 rounded-xl bg-purple-500/10 text-purple-400 flex items-center justify-center font-bold">
+                                    <i class="fa-solid fa-robot"></i>
+                                </div>
+                            </div>
+                            <div class="flex items-baseline space-x-2">
+                                <span class="text-3xl font-extrabold text-white">1,429</span>
+                                <span class="text-xs text-purple-400 font-bold">99.2% accuracy</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 mt-2">Handled by AI Bot during live & off-hours</p>
+                            <div class="absolute bottom-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500 to-transparent"></div>
+                        </div>
+                    </div>
+
+                    <!-- Quick Action Banner & Live Session Spotlight -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <!-- Spotlight Live Session -->
+                        <div class="lg:col-span-2 bg-gradient-to-br from-cardBg to-slate-900 border border-slate-800 rounded-2xl p-6 relative overflow-hidden shadow-xl flex flex-col justify-between">
+                            <div class="absolute top-0 right-0 w-64 h-64 bg-accentEmerald/5 rounded-full blur-3xl pointer-events-none"></div>
+                            <div>
+                                <div class="flex items-center justify-between mb-4">
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-500/10 text-accentEmerald border border-emerald-500/20 live-glow">
+                                        <span class="w-2 h-2 rounded-full bg-accentEmerald mr-2 animate-pulse"></span>
+                                        Upcoming Zoom Pro Session
+                                    </span>
+                                    <span class="text-xs text-slate-400"><i class="fa-regular fa-clock mr-1"></i> Today at 6:00 PM IST</span>
+                                </div>
+                                <h3 class="text-xl font-bold text-white mb-2">Price Action & Support/Resistance Mastery</h3>
+                                <p class="text-xs text-slate-300 leading-relaxed mb-4">
+                                    Join Dr. Alex Vance as we break down real-time order flow, multi-timeframe liquidity sweeps, and how to identify high-probability reversal zones without lagging indicators.
+                                </p>
+                            </div>
+                            <div class="flex flex-wrap items-center justify-between gap-4 pt-4 border-t border-slate-800">
+                                <div class="flex items-center space-x-3">
+                                    <div class="flex -space-x-2">
+                                        <div class="w-8 h-8 rounded-full bg-accentBlue text-white text-xs font-bold flex items-center justify-center border-2 border-slate-900">LC</div>
+                                        <div class="w-8 h-8 rounded-full bg-purple-500 text-white text-xs font-bold flex items-center justify-center border-2 border-slate-900">ER</div>
+                                        <div class="w-8 h-8 rounded-full bg-emerald-600 text-white text-xs font-bold flex items-center justify-center border-2 border-slate-900">+82</div>
+                                    </div>
+                                    <span class="text-xs text-slate-300 font-medium">84 students already registered</span>
+                                </div>
+                                <button onclick="joinZoomSession('892-401-9284')" class="bg-accentEmerald hover:bg-emerald-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl text-xs transition flex items-center space-x-2 shadow-lg shadow-emerald-900/30">
+                                    <i class="fa-solid fa-video"></i>
+                                    <span>Launch Zoom Pro (Host)</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Quick Institution Actions -->
+                        <div class="bg-cardBg border border-slate-800 rounded-2xl p-6 flex flex-col justify-between shadow-xl">
+                            <div>
+                                <h3 class="text-sm font-bold text-white mb-4 flex items-center space-x-2">
+                                    <i class="fa-solid fa-bolt text-accentCyan"></i>
+                                    <span>Quick Institution Tools</span>
+                                </h3>
+                                <div class="space-y-2.5">
+                                    <button onclick="openModal('scheduleModal')" class="w-full text-left bg-slate-900/80 hover:bg-slate-800 p-3 rounded-xl border border-slate-800 text-xs text-slate-200 font-medium flex items-center justify-between transition group">
+                                        <span class="flex items-center space-x-2.5">
+                                            <i class="fa-solid fa-calendar-plus text-accentEmerald"></i>
+                                            <span>Schedule Zoom Class</span>
+                                        </span>
+                                        <i class="fa-solid fa-chevron-right text-[10px] text-slate-500 group-hover:text-white transition"></i>
+                                    </button>
+                                    <button onclick="openModal('announcementModal')" class="w-full text-left bg-slate-900/80 hover:bg-slate-800 p-3 rounded-xl border border-slate-800 text-xs text-slate-200 font-medium flex items-center justify-between transition group">
+                                        <span class="flex items-center space-x-2.5">
+                                            <i class="fa-solid fa-bullhorn text-accentBlue"></i>
+                                            <span>Broadcast Announcement</span>
+                                        </span>
+                                        <i class="fa-solid fa-chevron-right text-[10px] text-slate-500 group-hover:text-white transition"></i>
+                                    </button>
+                                    <button onclick="switchTab('chatbot')" class="w-full text-left bg-slate-900/80 hover:bg-slate-800 p-3 rounded-xl border border-slate-800 text-xs text-slate-200 font-medium flex items-center justify-between transition group">
+                                        <span class="flex items-center space-x-2.5">
+                                            <i class="fa-solid fa-robot text-purple-400"></i>
+                                            <span>Test AI Knowledge Bot</span>
+                                        </span>
+                                        <i class="fa-solid fa-chevron-right text-[10px] text-slate-500 group-hover:text-white transition"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mt-4 pt-4 border-t border-slate-800 text-[11px] text-slate-400 flex items-center justify-between">
+                                <span>Zoom Pro API Status</span>
+                                <span class="text-accentEmerald font-semibold"><i class="fa-solid fa-circle text-[8px] mr-1"></i> Connected</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Recent Sessions Table & Cohort Breakdown -->
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        <!-- Recent Sessions List -->
+                        <div class="lg:col-span-2 bg-cardBg border border-slate-800 rounded-2xl p-6 shadow-xl">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-sm font-bold text-white">Upcoming & Recent Virtual Sessions</h3>
+                                <button onclick="switchTab('schedule')" class="text-xs text-accentBlue hover:underline font-semibold">View All Calendar</button>
+                            </div>
+                            <div class="overflow-x-auto">
+                                <table class="w-full text-left border-collapse text-xs">
+                                    <thead>
+                                        <tr class="border-b border-slate-800 text-slate-400">
+                                            <th class="py-3 font-semibold">Session Title</th>
+                                            <th class="py-3 font-semibold">Category</th>
+                                            <th class="py-3 font-semibold">Mentor</th>
+                                            <th class="py-3 font-semibold">Status</th>
+                                            <th class="py-3 font-semibold text-right">Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-800/60">
+                                        ${state.sessions.map(s => `
+                                            <tr class="hover:bg-slate-800/40 transition">
+                                                <td class="py-3 font-medium text-white">${s.title}</td>
+                                                <td class="py-3">
+                                                    <span class="px-2 py-0.5 rounded text-[10px] font-bold ${s.category === 'Beginner' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : s.category === 'Intermediate' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'}">${s.category}</span>
+                                                </td>
+                                                <td class="py-3 text-slate-300">${s.mentor}</td>
+                                                <td class="py-3">
+                                                    <span class="px-2 py-0.5 rounded text-[10px] font-bold ${s.status === 'Live Soon' ? 'bg-emerald-500/20 text-accentEmerald animate-pulse' : s.status === 'Recorded' ? 'bg-slate-800 text-slate-300' : 'bg-blue-500/10 text-accentBlue'}">${s.status}</span>
+                                                </td>
+                                                <td class="py-3 text-right">
+                                                    ${s.status === 'Recorded' ? 
+                                                        `<button onclick="showToast('Loading Zoom Cloud Recording...')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-semibold text-[11px]">Recording</button>` : 
+                                                        `<button onclick="joinZoomSession('${s.zoomId}')" class="px-2.5 py-1 bg-accentEmerald hover:bg-emerald-600 text-slate-950 rounded font-bold text-[11px]">Join Zoom</button>`
+                                                    }
+                                                </td>
+                                            </tr>
+                                        `).join('')}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Cohort Diversity Snapshot -->
+                        <div class="bg-cardBg border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between">
+                            <div>
+                                <h3 class="text-sm font-bold text-white mb-4">Student Background Diversity</h3>
+                                <p class="text-xs text-slate-400 mb-4">Our trading institution trains individuals from diverse professional and technical backgrounds.</p>
+                                <div class="space-y-3">
+                                    <div>
+                                        <div class="flex justify-between text-xs mb-1">
+                                            <span class="text-slate-300">Beginner / Retail Transition</span>
+                                            <span class="text-accentEmerald font-bold">38% (94 Students)</span>
+                                        </div>
+                                        <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden">
+                                            <div class="bg-accentEmerald h-full rounded-full" style="width: 38%"></div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="flex justify-between text-xs mb-1">
+                                            <span class="text-slate-300">Intermediate Forex & Crypto</span>
+                                            <span class="text-accentBlue font-bold">34% (85 Students)</span>
+                                        </div>
+                                        <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden">
+                                            <div class="bg-accentBlue h-full rounded-full" style="width: 34%"></div>
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div class="flex justify-between text-xs mb-1">
+                                            <span class="text-slate-300">Professional / Advanced</span>
+                                            <span class="text-purple-400 font-bold">28% (71 Students)</span>
+                                        </div>
+                                        <div class="w-full bg-slate-900 h-2 rounded-full overflow-hidden">
+                                            <div class="bg-purple-500 h-full rounded-full" style="width: 28%"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mt-6 pt-4 border-t border-slate-800">
+                                <button onclick="switchTab('students')" class="w-full py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl text-xs font-bold transition">Manage Full Roster</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderScheduleHTML() {
+            return `
+                <div class="space-y-6">
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-cardBg border border-slate-800 p-5 rounded-2xl">
+                        <div>
+                            <h3 class="text-sm font-bold text-white mb-1">Zoom Workplace Pro Integration</h3>
+                            <p class="text-xs text-slate-400">All sessions are hosted via secure Zoom Pro cloud infrastructure with automated recording sync.</p>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <button onclick="openModal('scheduleModal')" class="bg-accentEmerald hover:bg-emerald-600 text-slate-950 font-bold px-4 py-2 rounded-xl text-xs transition flex items-center space-x-2">
+                                <i class="fa-solid fa-plus"></i>
+                                <span>Schedule Zoom Session</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Session Grid -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                        ${state.sessions.map(s => `
+                            <div class="bg-cardBg border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between hover:border-slate-700 transition">
+                                <div>
+                                    <div class="flex items-center justify-between mb-3">
+                                        <span class="px-2.5 py-0.5 rounded text-xs font-bold ${s.category === 'Beginner' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : s.category === 'Intermediate' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'}">${s.category}</span>
+                                        <span class="text-xs text-slate-400 flex items-center"><i class="fa-regular fa-clock mr-1"></i>${s.time.replace('T', ' ')} IST</span>
+                                    </div>
+                                    <h4 class="text-base font-bold text-white mb-2">${s.title}</h4>
+                                    <p class="text-xs text-slate-300 mb-4">Lead Mentor: <span class="text-white font-semibold">${s.mentor}</span> • Zoom ID: <span class="text-accentBlue font-mono">${s.zoomId}</span></p>
+                                </div>
+                                <div class="flex items-center justify-between pt-4 border-t border-slate-800">
+                                    <span class="text-xs text-slate-400"><i class="fa-solid fa-user-group mr-1.5"></i>${s.attendees} Registered</span>
+                                    <div class="flex items-center space-x-2">
+                                        ${s.status === 'Recorded' ? 
+                                            `<button onclick="showToast('Streaming Zoom Cloud Recording...')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-bold text-xs">Watch Recording</button>` :
+                                            `<button onclick="joinZoomSession('${s.zoomId}')" class="px-3.5 py-1.5 bg-accentEmerald hover:bg-emerald-600 text-slate-950 rounded-lg font-bold text-xs shadow-lg shadow-emerald-900/30 flex items-center space-x-1.5">
+                                                <i class="fa-solid fa-video"></i>
+                                                <span>Join Zoom</span>
+                                            </button>`
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderChatbotHTML() {
+            return `
+                <div class="grid grid-cols-1 lg:grid-cols-4 gap-6 h-[calc(100vh-10rem)]">
+                    <!-- Chat Control Panel / Mode Switcher -->
+                    <div class="lg:col-span-1 bg-cardBg border border-slate-800 rounded-2xl p-5 flex flex-col justify-between shadow-xl">
+                        <div>
+                            <div class="flex items-center space-x-3 mb-4 pb-4 border-b border-slate-800">
+                                <div class="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold text-lg">
+                                    <i class="fa-solid fa-robot"></i>
+                                </div>
+                                <div>
+                                    <h3 class="text-sm font-bold text-white">AI Knowledge Bot</h3>
+                                    <p class="text-[10px] text-accentEmerald">Trained on Trading KB</p>
+                                </div>
+                            </div>
+
+                            <p class="text-xs text-slate-400 mb-4">Select bot operation mode depending on whether you are currently in a live Zoom webinar or studying off-hours.</p>
+
+                            <!-- Mode Selector -->
+                            <div class="space-y-2.5 mb-6">
+                                <button onclick="setChatbotMode('session')" class="w-full text-left p-3 rounded-xl border text-xs font-medium transition flex items-center justify-between ${state.chatbotMode === 'session' ? 'bg-accentEmerald/10 border-accentEmerald/40 text-accentEmerald' : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'}">
+                                    <span class="flex items-center space-x-2.5">
+                                        <i class="fa-solid fa-bolt text-accentEmerald"></i>
+                                        <div>
+                                            <p class="font-bold">Session Mode (Live Q&A)</p>
+                                            <p class="text-[10px] text-slate-400">Instant answers for Zoom webinars</p>
+                                        </div>
+                                    </span>
+                                    ${state.chatbotMode === 'session' ? '<i class="fa-solid fa-circle-check text-accentEmerald"></i>' : ''}
+                                </button>
+
+                                <button onclick="setChatbotMode('offline')" class="w-full text-left p-3 rounded-xl border text-xs font-medium transition flex items-center justify-between ${state.chatbotMode === 'offline' ? 'bg-accentBlue/10 border-accentBlue/40 text-accentBlue' : 'bg-slate-900 border-slate-800 text-slate-300 hover:bg-slate-800'}">
+                                    <span class="flex items-center space-x-2.5">
+                                        <i class="fa-solid fa-book-open text-accentBlue"></i>
+                                        <div>
+                                            <p class="font-bold">Off-Hours / Self-Paced</p>
+                                            <p class="text-[10px] text-slate-400">Deep reference lookup & playbook</p>
+                                        </div>
+                                    </span>
+                                    ${state.chatbotMode === 'offline' ? '<i class="fa-solid fa-circle-check text-accentBlue"></i>' : ''}
+                                </button>
+                            </div>
+
+                            <!-- Quick Prompt Suggestions -->
+                            <div>
+                                <p class="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">Quick Trading Prompts</p>
+                                <div class="space-y-1.5">
+                                    <button onclick="sendQuickPrompt('What is stop loss and how to calculate risk-to-reward?')" class="w-full text-left text-xs bg-slate-900 hover:bg-slate-800 p-2.5 rounded-lg border border-slate-800 text-slate-300 transition truncate">
+                                        <i class="fa-solid fa-arrow-right text-[10px] text-accentEmerald mr-1.5"></i> What is stop loss & R:R?
+                                    </button>
+                                    <button onclick="sendQuickPrompt('Explain MACD and RSI divergence strategies.')" class="w-full text-left text-xs bg-slate-900 hover:bg-slate-800 p-2.5 rounded-lg border border-slate-800 text-slate-300 transition truncate">
+                                        <i class="fa-solid fa-arrow-right text-[10px] text-accentEmerald mr-1.5"></i> Explain MACD & RSI divergence
+                                    </button>
+                                    <button onclick="sendQuickPrompt('How do prop firm daily drawdown limits work?')" class="w-full text-left text-xs bg-slate-900 hover:bg-slate-800 p-2.5 rounded-lg border border-slate-800 text-slate-300 transition truncate">
+                                        <i class="fa-solid fa-arrow-right text-[10px] text-accentEmerald mr-1.5"></i> Prop firm drawdown limits
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="text-[11px] text-slate-500 pt-3 border-t border-slate-800">
+                            Knowledge Base Version: 4.8.2-PRO
+                        </div>
+                    </div>
+
+                    <!-- Chat Window Area -->
+                    <div class="lg:col-span-3 bg-cardBg border border-slate-800 rounded-2xl flex flex-col shadow-xl overflow-hidden">
+                        <!-- Chat Header -->
+                        <div class="p-4 border-b border-slate-800 bg-slate-900/50 flex items-center justify-between">
+                            <div class="flex items-center space-x-3">
+                                <span class="w-3 h-3 rounded-full bg-accentEmerald animate-pulse"></span>
+                                <div>
+                                    <h4 class="text-xs font-bold text-white">Apex AI Knowledge-Base Assistant</h4>
+                                    <p class="text-[10px] text-slate-400">Mode: <span class="text-accentEmerald font-semibold">${state.chatbotMode === 'session' ? 'Live Webinar Q&A (Ultra-fast)' : 'Self-Paced Deep Study'}</span></p>
+                                </div>
+                            </div>
+                            <button onclick="clearChat()" class="text-xs text-slate-400 hover:text-white bg-slate-800 px-3 py-1.5 rounded-lg transition">Clear Chat</button>
+                        </div>
+
+                        <!-- Chat Messages Container -->
+                        <div id="chat-messages" class="flex-1 p-6 overflow-y-auto space-y-4 bg-darkBg/50">
+                            ${state.chatMessages.map(msg => `
+                                <div class="flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'}">
+                                    <div class="max-w-[80%] rounded-2xl px-4 py-3 text-xs leading-relaxed ${msg.sender === 'user' ? 'bg-accentEmerald text-slate-950 font-medium rounded-br-none' : 'bg-cardBg border border-slate-800 text-slate-100 rounded-bl-none shadow-lg'}">
+                                        ${msg.sender === 'bot' ? '<p class="text-[10px] font-bold text-accentEmerald mb-1">Apex AI Assistant</p>' : ''}
+                                        <p>${msg.text}</p>
+                                        <p class="text-[9px] mt-1 text-right ${msg.sender === 'user' ? 'text-slate-800' : 'text-slate-400'}">${msg.time}</p>
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+
+                        <!-- Chat Input Box -->
+                        <div class="p-4 border-t border-slate-800 bg-cardBg">
+                            <form onsubmit="handleChatSubmit(event)" class="flex items-center space-x-3">
+                                <input type="text" id="chatInput" placeholder="Ask anything about trading terminology, strategies, or risk rules..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-xs text-white focus:outline-none focus:border-accentEmerald">
+                                <button type="submit" class="bg-accentEmerald hover:bg-emerald-600 text-slate-950 px-5 py-3 rounded-xl text-xs font-bold transition shadow-lg shadow-emerald-900/20 flex items-center space-x-1.5">
+                                    <span>Send</span>
+                                    <i class="fa-solid fa-paper-plane"></i>
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderResourcesHTML() {
+            return `
+                <div class="space-y-6">
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-cardBg border border-slate-800 p-5 rounded-2xl">
+                        <div>
+                            <h3 class="text-sm font-bold text-white mb-1">Reference Materials & Resource Hub</h3>
+                            <p class="text-xs text-slate-400">Curated cheat sheets, strategy playbooks, indicators, and video archives for all trader experience levels.</p>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <input type="text" id="resourceSearch" oninput="filterResources()" placeholder="Search guides, indicators..." class="bg-slate-900 border border-slate-700 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-accentEmerald w-60">
+                        </div>
+                    </div>
+
+                    <!-- Resources Grid -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5" id="resourcesGrid">
+                        ${state.resources.map(r => `
+                            <div class="bg-cardBg border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col justify-between hover:border-slate-700 transition">
+                                <div>
+                                    <div class="flex items-center justify-between mb-3">
+                                        <span class="px-2.5 py-0.5 rounded text-xs font-bold ${r.category === 'Beginner' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : r.category === 'Intermediate' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'}">${r.category}</span>
+                                        <button onclick="toggleBookmark(${r.id})" class="text-slate-400 hover:text-accentEmerald transition">
+                                            <i class="fa-${r.bookmarked ? 'solid text-accentEmerald' : 'regular'} fa-bookmark text-sm"></i>
+                                        </button>
+                                    </div>
+                                    <span class="text-[10px] text-accentBlue font-semibold uppercase tracking-wider">${r.type}</span>
+                                    <h4 class="text-base font-bold text-white mt-1 mb-2">${r.title}</h4>
+                                </div>
+                                <div class="flex items-center justify-between pt-4 border-t border-slate-800">
+                                    <span class="text-xs text-slate-400"><i class="fa-solid fa-download mr-1.5"></i>${r.downloads} downloads</span>
+                                    <button onclick="showToast('Downloading resource file securely...')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg font-bold text-xs transition">Access File</button>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderStudentsHTML() {
+            return `
+                <div class="space-y-6">
+                    <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 bg-cardBg border border-slate-800 p-5 rounded-2xl">
+                        <div>
+                            <h3 class="text-sm font-bold text-white mb-1">Student Roster & Cohort Tracking</h3>
+                            <p class="text-xs text-slate-400">Monitor student backgrounds, attendance records, and individual learning progress across sessions.</p>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <button onclick="showToast('Exporting Student Analytics CSV...')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 px-3.5 py-2 rounded-xl text-xs font-semibold transition border border-slate-700 flex items-center space-x-1.5">
+                                <i class="fa-solid fa-file-excel text-accentEmerald"></i>
+                                <span>Export Roster</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Students Table -->
+                    <div class="bg-cardBg border border-slate-800 rounded-2xl p-6 shadow-xl overflow-x-auto">
+                        <table class="w-full text-left border-collapse text-xs">
+                            <thead>
+                                <tr class="border-b border-slate-800 text-slate-400">
+                                    <th class="py-3 font-semibold">Student Name</th>
+                                    <th class="py-3 font-semibold">Professional Background</th>
+                                    <th class="py-3 font-semibold">Experience Level</th>
+                                    <th class="py-3 font-semibold">Zoom Attendance</th>
+                                    <th class="py-3 font-semibold">Course Progress</th>
+                                    <th class="py-3 font-semibold">Status</th>
+                                    <th class="py-3 font-semibold text-right">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-800/60">
+                                ${state.students.map(st => `
+                                    <tr class="hover:bg-slate-800/40 transition">
+                                        <td class="py-3.5 font-bold text-white flex items-center space-x-2.5">
+                                            <div class="w-7 h-7 rounded-full bg-slate-800 text-slate-300 font-bold flex items-center justify-center text-[11px] border border-slate-700">${st.name.split(' ').map(n=>n[0]).join('')}</div>
+                                            <span>${st.name}</span>
+                                        </td>
+                                        <td class="py-3.5 text-slate-300">${st.background}</td>
+                                        <td class="py-3.5">
+                                            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${st.level === 'Beginner' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' : st.level === 'Intermediate' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'}">${st.level}</span>
+                                        </td>
+                                        <td class="py-3.5 text-slate-200 font-semibold">${st.attendance}</td>
+                                        <td class="py-3.5">
+                                            <div class="flex items-center space-x-2">
+                                                <div class="w-20 bg-slate-900 h-2 rounded-full overflow-hidden">
+                                                    <div class="bg-accentEmerald h-full rounded-full" style="width: ${st.progress}"></div>
+                                                </div>
+                                                <span class="text-slate-300 font-semibold">${st.progress}</span>
+                                            </div>
+                                        </td>
+                                        <td class="py-3.5">
+                                            <span class="px-2 py-0.5 rounded text-[10px] font-bold ${st.status === 'Active' ? 'bg-emerald-500/10 text-accentEmerald border border-emerald-500/20' : 'bg-red-500/10 text-accentRed border border-red-500/20'}">${st.status}</span>
+                                        </td>
+                                        <td class="py-3.5 text-right">
+                                            <button onclick="showToast('Opening student details & progress report...')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded font-semibold text-[11px]">View Profile</button>
+                                        </td>
+                                    </tr>
+                                `).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Action Handlers & Modals
+        function openModal(modalId) {
+            document.getElementById(modalId).classList.remove('hidden');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+        }
+
+        function showToast(msg, title = 'Zoom Pro Notification') {
+            const toast = document.getElementById('toast');
+            document.getElementById('toast-title').innerText = title;
+            document.getElementById('toast-msg').innerText = msg;
+            toast.classList.remove('translate-y-24', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-24', 'opacity-0');
+            }, 3500);
+        }
+
+        function joinZoomSession(zoomId) {
+            showToast(`Launching Zoom Workplace Pro Meeting (ID: ${zoomId})...`, 'Zoom Pro Secure Launch');
+        }
+
+        function handleScheduleSubmit(e) {
+            e.preventDefault();
+            const title = document.getElementById('sessionTitle').value;
+            const category = document.getElementById('sessionCategory').value;
+            const time = document.getElementById('sessionTime').value;
+            const zoomLink = document.getElementById('zoomLink').value;
+
+            state.sessions.unshift({
+                id: state.sessions.length + 1,
+                title: title,
+                category: category,
+                time: time.replace('T', ' '),
+                zoomId: '992-182-3910',
+                status: 'Live Soon',
+                mentor: 'Dr. Alex Vance',
+                attendees: 1
+            });
+
+            closeModal('scheduleModal');
+            showToast('New Zoom session successfully scheduled and broadcasted to enrolled students!', 'Zoom Pro Schedule');
+            renderContent();
+        }
+
+        function handleAnnouncementSubmit(e) {
+            e.preventDefault();
+            closeModal('announcementModal');
+            showToast('Broadcast successfully sent to all enrolled student cohorts via Push & Email.', 'Institution Announcement');
+        }
+
+        function setChatbotMode(mode) {
+            state.chatbotMode = mode;
+            renderContent();
+            showToast(`Switched bot to ${mode === 'session' ? 'Live Session Q&A Mode' : 'Off-Hours Deep Study Mode'}`, 'AI Knowledge Bot');
+        }
+
+        function sendQuickPrompt(promptText) {
+            state.chatMessages.push({ sender: 'user', text: promptText, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
+            
+            setTimeout(() => {
+                let botReply = "According to our Apex Trading knowledge base: ";
+                if (promptText.includes('stop loss')) {
+                    botReply += "A Stop Loss order automatically exits your trade when price reaches a predetermined level to prevent catastrophic losses. Always risk a maximum of 1% to 2% of your total trading capital per trade.";
+                } else if (promptText.includes('MACD')) {
+                    botReply += "MACD (Moving Average Convergence Divergence) measures momentum. RSI (Relative Strength Index) measures overbought/oversold conditions above 70 and below 30. Bullish divergence occurs when price makes lower lows while RSI makes higher lows.";
+                } else {
+                    botReply += "Prop firm drawdown limits typically consist of a Daily Drawdown limit (e.g., 5% equity drop in a single day) and a Maximum Trailing Drawdown (e.g., 8-10% overall). Strict risk parameters must be maintained.";
+                }
+                state.chatMessages.push({ sender: 'bot', text: botReply, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
+                renderContent();
+                scrollToBottomChat();
+            }, 600);
+
+            renderContent();
+            scrollToBottomChat();
+        }
+
+        function handleChatSubmit(e) {
+            e.preventDefault();
+            const input = document.getElementById('chatInput');
+            const txt = input.value.trim();
+            if (!txt) return;
+
+            state.chatMessages.push({ sender: 'user', text: txt, time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) });
+            input.value = '';
+            renderContent();
+            scrollToBottomChat();
+
+            setTimeout(() => {
+                state.chatMessages.push({ 
+                    sender: 'bot', 
+                    text: `[${state.chatbotMode.toUpperCase()} MODE] Based on your query regarding "${txt}", our curriculum covers this extensively in Module 4. Ensure you maintain strict risk-reward ratios and review the attached reference sheet in the Resource Hub.`, 
+                    time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) 
+                });
+                renderContent();
+                scrollToBottomChat();
+            }, 700);
+        }
+
+        function clearChat() {
+            state.chatMessages = [
+                { sender: 'bot', text: 'Chat cleared. How else can I assist your trading session today?', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) }
+            ];
+            renderContent();
+        }
+
+        function scrollToBottomChat() {
+            const container = document.getElementById('chat-messages');
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        function toggleBookmark(id) {
+            const res = state.resources.find(r => r.id === id);
+            if (res) {
+                res.bookmarked = !res.bookmarked;
+                renderContent();
+                showToast(res.bookmarked ? 'Added to your bookmarked reference materials.' : 'Removed from bookmarks.', 'Resource Hub');
+            }
+        }
+
+        function filterResources() {
+            const q = document.getElementById('resourceSearch').value.toLowerCase();
+            const cards = document.querySelectorAll('#resourcesGrid > div');
+            cards.forEach(card => {
+                const text = card.innerText.toLowerCase();
+                card.style.display = text.includes(q) ? 'flex' : 'none';
+            });
+        }
+
+        // Initial Load
+        window.onload = function() {
+            renderContent();
+        }
+    </script>
+</body>
+</html>

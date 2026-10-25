@@ -1,0 +1,27 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "sbc-traders-lms",
+  "main": "worker/index.js",
+  "compatibility_date": "2026-10-21",
+  "upload_source_maps": true,
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sbc-lms",
+      // Production D1 for this repo. For a new environment, replace this with
+      // the id printed by: wrangler d1 create sbc-lms
+      "database_id": "d133cc9b-535e-4a29-a04a-eb6ddcfaefab"
+    }
+  ]
+}

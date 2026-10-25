@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.env
+.env.local
+*.log
+.DS_Store
+
+# Cloudflare / Wrangler
+.wrangler/
+.dev.vars
+worker/seed.sql
+
+# Sensitive local exports — never commit
+SBC-Traders-Credentials.csv
+students DETAILS.csv
+
+# Local SQLite database and generated data exports (real student data)
+server/sbc.db
+server/sbc.db-*
+server/*.json
