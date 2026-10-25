@@ -39,9 +39,9 @@ const readFileAsDataUrl = (file) =>
   });
 
 /**
- * Reference Hub — materials are stored server-side (materials.json) so admin
- * edits survive a restart and everyone sees the same list. Each material has
- * a real URL, so "Open" actually opens the document.
+ * Reference Hub — materials are stored in the LMS database so admin edits
+ * survive a restart and everyone sees the same list. Each material can carry
+ * an external link and one or more uploaded PDFs.
  *
  * Participants (`canEdit=false`) get a read-only hub: browse and open only —
  * add/edit/delete stay admin-only.
@@ -55,6 +55,10 @@ export default function Resources({ canEdit = true }) {
   const [files, setFiles] = useState([]); // PDFs already saved on the material
   const [newFiles, setNewFiles] = useState([]); // File objects waiting for save
   const [uploadStep, setUploadStep] = useState('');
+  // In-app announcement sent with the save (default on for a new material,
+  // auto-enabled when new PDFs are picked, opt-out via the checkbox).
+  const [notifyStudents, setNotifyStudents] = useState(true);
+  const [notifyTouched, setNotifyTouched] = useState(false);
   const [deleting, setDeleting] = useState(null);
   const [pending, run] = usePending();
 
@@ -75,6 +79,8 @@ export default function Resources({ canEdit = true }) {
     setFiles([]);
     setNewFiles([]);
     setUploadStep('');
+    setNotifyStudents(true); // new material → tell students by default
+    setNotifyTouched(false);
     setModal('new');
   };
 
@@ -89,6 +95,8 @@ export default function Resources({ canEdit = true }) {
     setFiles(material.files || []);
     setNewFiles([]);
     setUploadStep('');
+    setNotifyStudents(false); // routine edits stay quiet unless asked
+    setNotifyTouched(false);
     setModal(material);
   };
 
@@ -109,7 +117,12 @@ export default function Resources({ canEdit = true }) {
       if (newFiles.some((f) => f.name === file.name && f.size === file.size)) continue;
       accepted.push(file);
     }
-    if (accepted.length) setNewFiles((current) => [...current, ...accepted]);
+    if (accepted.length) {
+      setNewFiles((current) => [...current, ...accepted]);
+      // Picking PDFs for an existing material implies "tell students" unless
+      // the mentor explicitly turned the checkbox off.
+      if (!notifyTouched) setNotifyStudents(true);
+    }
   };
 
   const removeSavedFile = async (material, file) => {
@@ -125,9 +138,11 @@ export default function Resources({ canEdit = true }) {
 
   const save = async (e) => {
     e.preventDefault();
+    const isNew = modal === 'new';
+    const addedFiles = [...newFiles];
     try {
       let saved;
-      if (modal === 'new') {
+      if (isNew) {
         saved = await run(() => api.post('/materials', form));
         // If a PDF upload fails below, retrying now PATCHes this material
         // instead of creating a duplicate.
@@ -141,7 +156,7 @@ export default function Resources({ canEdit = true }) {
       // Upload sequentially: one PDF per request keeps each body small and
       // gives a clear progress label. Successfully uploaded files leave the
       // pending list, so a retry after a failure never duplicates them.
-      const remaining = [...newFiles];
+      const remaining = [...addedFiles];
       const total = remaining.length;
       while (remaining.length) {
         const file = remaining[0];
@@ -154,6 +169,36 @@ export default function Resources({ canEdit = true }) {
         setNewFiles([...remaining]);
       }
       setUploadStep('');
+
+      // Notify every student in-app. A notification failure must not undo or
+      // hide the fact that the material itself was saved.
+      if (notifyStudents) {
+        const fileLine = addedFiles.length
+          ? `\n\nPDF${addedFiles.length === 1 ? '' : 's'}: ${addedFiles.map((f) => f.name).join(', ')}`
+          : '';
+        try {
+          await api.post('/announcements', {
+            subject: `${isNew ? 'New material' : 'Material updated'}: ${form.title}`,
+            body: [
+              isNew
+                ? `A new material has been added to the Reference Hub: “${form.title}”.`
+                : `A Reference Hub material has been updated: “${form.title}”.`,
+              form.description ? `\n${form.description}` : '',
+              fileLine,
+              '\nOpen Reference Hub & Materials to view it.',
+            ]
+              .join('')
+              .trim(),
+          });
+          showToast('Students will see it once at their next sign-in.', 'Students notified');
+        } catch (err) {
+          showToast(
+            `The material was saved, but the student notification failed: ${err.message}`,
+            'Notification failed',
+            'error'
+          );
+        }
+      }
 
       setModal(null);
       setNewFiles([]);
@@ -525,6 +570,29 @@ export default function Resources({ canEdit = true }) {
               className={input}
             />
           </div>
+
+          <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-slate-800 bg-slate-900/60 px-3.5 py-3">
+            <input
+              id="mat-notify"
+              type="checkbox"
+              checked={notifyStudents}
+              onChange={(e) => {
+                setNotifyStudents(e.target.checked);
+                setNotifyTouched(true);
+              }}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-500"
+            />
+            <span className="min-w-0">
+              <span className="block text-xs font-semibold text-slate-200">
+                Notify students in-app
+              </span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-slate-500">
+                Publishes a one-time message to every student. It appears in their message centre at
+                the next sign-in and clears when they dismiss it. On by default for new materials and
+                newly picked PDFs — untick to save quietly.
+              </span>
+            </span>
+          </label>
 
           <div className="flex flex-col-reverse gap-3 border-t border-slate-800 pt-4 sm:flex-row sm:justify-end">
             <button

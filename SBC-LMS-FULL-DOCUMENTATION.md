@@ -1237,6 +1237,14 @@ Material fields:
 | **Category** | Beginner, Intermediate, Advanced. |
 | **Type** | Reference Guide, Concept Guide, API Reference, Worksheet, Practice Tool, Video Recording. |
 | **Description** | Optional summary. |
+| **Notify students in-app** | Default **on** when adding a material or picking new PDFs, default **off** for routine edits. Publishes a one-time announcement to every student. |
+
+Student notification:
+
+- Saving a material publishes an in-app announcement (the same message centre used by **Broadcast**) so students see the addition at their next sign-in.
+- The announcement names the material, repeats its description, and lists the PDFs added in that save.
+- A notification failure never rolls back the material; the save stays and the modal reports the notification failure separately.
+- To notify about a material that was already saved, edit it, tick **Notify students in-app**, and save. This sends one announcement and does not touch the PDFs.
 
 PDF handling:
 
@@ -1365,6 +1373,7 @@ Actions:
 Important behaviour:
 
 - **In-app delivery is per student and one-shot.** Each announcement is stored once and read state is tracked per student. A student sees it once; dismissing the message centre marks it read and clears the red unread count. The next sign-in does not show it again.
+- **Reference Hub saves can publish too.** Adding a material, or uploading new PDFs with **Notify students in-app** ticked, creates the same kind of announcement automatically (see 9.10). The manual composer remains the way to send free-form messages.
 - Announcements created before a student's enrolment timestamp are hidden from that student.
 - The admin **“view as” preview** never fetches or marks announcement read state, so previewing a student cannot clear their real unread messages.
 - Email recipients come from the **attendance roster** for the lookback window, not directly from the enrolment list. Students who have never attended a class in that window do not appear in the email list.
@@ -1467,6 +1476,8 @@ Links are signed and can expire. If one stops working, reload the page to get a 
 **Navigation:** Sidebar → **Reference Hub**
 
 Browse guides and materials by level and search term. Each card lists any attached PDF documents; select a PDF name to open it, or **Open** to launch the material's external link (or its first PDF when there is no link). Students cannot add, edit, or delete materials; ask your mentor if a PDF or link is missing.
+
+When a mentor adds a material or uploads new PDFs with **Notify students in-app** ticked, that addition also arrives in the student **message centre** (see 10.5) as a “New material” message, so the red badge appears until you dismiss it.
 
 ### 10.5 Messages from your mentor
 
@@ -2057,7 +2068,7 @@ These are not blockers for the current deployment, but should be considered befo
    - recordings;
    - Q&A;
    - AI bot;
-   - PDF upload/open from the Reference Hub;
+   - PDF upload/open from the Reference Hub, and the **Notify students in-app** announcement it creates;
    - publish an announcement and confirm the student unread badge clears after dismissal.
 
 ```bash
@@ -2186,6 +2197,7 @@ Do not seed production with private export files unless you have verified the co
 | PDF upload rejected | Not a real PDF (`%PDF-` missing), over 8 MB, or more than 10 files in one request | Upload a valid PDF up to 8 MB; retry with fewer files. |
 | Uploaded PDF will not open | File bytes were removed or the material was edited | Re-upload the PDF; check the Worker/D1 logs if it repeats. |
 | Student does not see an announcement | Announcement predates their enrolment, or another browser already marked it read | Publish a new announcement; read state is per student and per message. |
+| Student does not see a Reference Hub addition | The material was saved with **Notify students in-app** unticked, or it was added before auto-notify existed | Edit the material, tick **Notify students in-app**, and save once. |
 | Red unread badge will not clear | The read request failed while offline | Reopen the message centre and dismiss it again; the badge also refreshes on the 60-second poll. |
 | Admin preview shows “No student selected” | No participant chosen | Account menu → Participants → choose a student. |
 | Worker returns “API is still starting” | D1/init not finished | Retry after a moment; check Worker logs. |

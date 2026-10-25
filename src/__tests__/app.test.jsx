@@ -716,6 +716,34 @@ describe('SBC-LMS dashboard', () => {
     await waitFor(() => expect(screen.queryByText(/Remove/)).toBeNull(), { timeout: 3000 });
   });
 
+  it('notifies students when a material is added, and can be silenced', async () => {
+    renderApp();
+    fireEvent.click(await screen.findByText('Reference Hub'));
+    await screen.findByText('Zoom Meeting Controls');
+
+    // Add a material with the default "Notify students" opt-in.
+    fireEvent.click(await screen.findByText('Add material'));
+    let dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/^Title/), { target: { value: 'Risk Playbook' } });
+    expect(within(dialog).getByLabelText(/Notify students in-app/).checked).toBe(true);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add material' }));
+
+    await waitFor(() => expect(mock.announcementPosts).toHaveLength(1));
+    expect(mock.announcementPosts[0].subject).toBe('New material: Risk Playbook');
+    expect(mock.announcementPosts[0].body).toContain('Risk Playbook');
+    expect(await screen.findByText('Students notified')).toBeTruthy();
+
+    // Opt out on the next add: no second announcement.
+    fireEvent.click(await screen.findByText('Add material'));
+    dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/^Title/), { target: { value: 'Quiet Update' } });
+    fireEvent.click(within(dialog).getByLabelText(/Notify students in-app/));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Add material' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(mock.announcementPosts).toHaveLength(1);
+  });
+
   it('publishes an in-app announcement to every student', async () => {
     renderApp();
     fireEvent.click(await screen.findByText('Broadcast'));
