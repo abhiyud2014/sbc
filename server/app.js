@@ -56,6 +56,56 @@ export function buildStudentAttendance(roster, student) {
 }
 
 /**
+ * Attendance for one student from already-fetched participant rows.
+ *
+ * `participantsByKey` maps an instance key (`uuid` when Zoom gives one, else
+ * the meeting id) to that instance's participant array. A key that is missing
+ * means "not fetched yet" and is returned in `pending`, so the caller can say
+ * "syncing" instead of wrongly reporting the student as Absent.
+ *
+ * Matching unions email and exact display name, because Zoom records the same
+ * person twice when one join has an email and another does not.
+ */
+export function attendanceFromParticipants(instances, student, participantsByKey) {
+  const wantedEmail = (student?.email || '').trim().toLowerCase();
+  const wantedName = (student?.name || '').trim().toLowerCase();
+  const byUuid = new Map();
+  const byInstance = new Map();
+  const pending = [];
+  const lookup = (key) =>
+    participantsByKey instanceof Map ? participantsByKey.get(key) : participantsByKey?.[key];
+
+  for (const meeting of instances || []) {
+    const key = String(meeting.uuid || meeting.id || '');
+    const rows = lookup(key);
+    if (rows === undefined || rows === null) {
+      pending.push(key);
+      continue;
+    }
+
+    let minutes = 0;
+    let joined = false;
+    for (const p of rows) {
+      const email = (p.user_email || '').trim().toLowerCase();
+      const name = (p.name || '').trim().toLowerCase();
+      const emailHit = Boolean(wantedEmail && email && email === wantedEmail);
+      const nameHit = Boolean(wantedName && name && name === wantedName);
+      if (!emailHit && !nameHit) continue;
+      joined = true;
+      minutes += Math.round((Number(p.duration) || 0) / 60);
+    }
+    if (!joined) continue;
+
+    if (meeting.uuid) byUuid.set(String(meeting.uuid), minutes);
+    if (meeting.id && meeting.start_time) {
+      byInstance.set(`${meeting.id}|${meeting.start_time}`, minutes);
+    }
+  }
+
+  return { byUuid, byInstance, pending };
+}
+
+/**
  * Build the Express app around an injected repository set.
  *
  * `repos` is either the synchronous node:sqlite repositories (server/repos.js)
@@ -229,6 +279,59 @@ async function mapLimit(items, limit, fn) {
 
 /** Zoom uuids can contain `/`, so they must be double-encoded in the path. */
 const encodeMeetingKey = (key) => encodeURIComponent(encodeURIComponent(String(key)));
+
+/* ------------------ per-instance participant cache ----------------- */
+/**
+ * A Workers invocation may only make ~50 subrequests on the free plan, and
+ * the meeting report needs ONE participants call per past session. A 30-day
+ * roster (170+ sessions) therefore cannot finish in a single request: the
+ * platform starts rejecting fetches and the old code silently treated those
+ * sessions as "nobody attended".
+ *
+ * Cache participant rows per instance instead, fetch only what is missing,
+ * and surface anything unfetched as "pending" rather than "Absent". Repeated
+ * polls and My Classes visits advance the backfill.
+ */
+const PARTICIPANT_CACHE_MS = Number(config.participantCacheMs || 10 * 60_000);
+const PARTICIPANT_CACHE_MAX = 300;
+/** Leave ~15 subrequests of headroom for token/report/host lookups. */
+const ROSTER_FETCH_BUDGET = Number(config.rosterFetchBudget || 30);
+const ATTENDANCE_FETCH_BUDGET = Number(config.attendanceFetchBudget || 30);
+const participantCache = new Map();
+
+const participantKey = (meeting) => String(meeting?.uuid || meeting?.id || '');
+
+/** Cached participant rows for an instance, or null when absent/stale. */
+const readParticipantCache = (key) => {
+  const k = String(key || '');
+  const hit = participantCache.get(k);
+  if (!hit) return null;
+  if (Date.now() - hit.at > PARTICIPANT_CACHE_MS) {
+    participantCache.delete(k);
+    return null;
+  }
+  return hit.participants;
+};
+
+const writeParticipantCache = (key, participants) => {
+  const k = String(key || '');
+  participantCache.delete(k);
+  participantCache.set(k, { at: Date.now(), participants });
+  while (participantCache.size > PARTICIPANT_CACHE_MAX) {
+    participantCache.delete(participantCache.keys().next().value);
+  }
+};
+
+async function fetchParticipantsFor(meeting) {
+  const key = participantKey(meeting);
+  const data = await zoomAllPages(
+    `/past_meetings/${encodeMeetingKey(meeting.uuid || meeting.id)}/participants`,
+    { query: { page_size: 300 }, listKey: 'participants' }
+  );
+  const participants = data.participants || [];
+  writeParticipantCache(key, participants);
+  return participants;
+}
 
 /* ------------------------------------------------------------------ */
 /* App                                                                 */
@@ -912,17 +1015,28 @@ async function buildRoster(days) {
     meetings.push(...(data.meetings || []));
   }
 
-  // 2) Who attended each one? (limited concurrency so we don't hammer Zoom)
+  // 2) Who attended each one? One Zoom call per instance, but a Workers
+  // invocation cannot make 170+ subrequests, so reuse the per-instance cache
+  // and fetch a bounded number of uncached instances per build. Repeated
+  // polls advance the backfill; sessions not fetched yet are reported as
+  // pending instead of being silently treated as empty.
+  const toFetch = [];
+  for (const m of meetings) {
+    if (toFetch.length >= ROSTER_FETCH_BUDGET) break;
+    if (!readParticipantCache(participantKey(m))) toFetch.push(participantKey(m));
+  }
+  const fetchable = new Set(toFetch);
+
   const rows = await mapLimit(meetings, 4, async (m) => {
+    const key = participantKey(m);
+    const cached = readParticipantCache(key);
+    if (cached) return { meeting: m, participants: cached };
+    if (!fetchable.has(key)) return { meeting: m, participants: null };
     try {
-      const data = await zoomAllPages(`/past_meetings/${encodeMeetingKey(m.uuid || m.id)}/participants`, {
-        query: { page_size: 300 },
-        listKey: 'participants',
-      });
-      return { meeting: m, participants: data.participants || [] };
+      return { meeting: m, participants: await fetchParticipantsFor(m) };
     } catch {
       // Some instances have no participant detail available — skip, don't fail.
-      return { meeting: m, participants: [] };
+      return { meeting: m, participants: null };
     }
   });
 
@@ -931,8 +1045,15 @@ async function buildRoster(days) {
   // leave 14:26:21 returns 184). The meeting report's `duration` is minutes.
   const people = new Map();
   let joinRecords = 0;
+  let pendingSessions = 0;
 
   for (const { meeting, participants } of rows) {
+    // null = participant rows not fetched yet (budget/limit); counting those
+    // as "nobody joined" is what made attendance look empty in production.
+    if (participants === null) {
+      pendingSessions += 1;
+      continue;
+    }
     for (const p of participants) {
       const personEmail = (p.user_email || '').trim().toLowerCase();
       const personName = (p.name || '').trim().toLowerCase();
@@ -1004,6 +1125,9 @@ async function buildRoster(days) {
     windowDays: days,
     sessionsAnalyzed: meetings.length,
     joinRecords,
+    // Sessions whose participant rows the platform cache has not fetched yet.
+    // Consumers should show "syncing" rather than "absent" for these.
+    pendingSessions,
     // Session list (what actually happened) so consumers like My Classes can
     // cross-reference targeted batches against real sessions without a second
     // Zoom walk. Report `duration` is MINUTES (participants' is seconds).
@@ -1993,7 +2117,8 @@ app.put(
  *   GET /api/my-classes?studentId=stu-x&days=30
  *   - upcoming sessions assigned to the student's batches, each with their
  *     personalised join link when they were registered
- *   - past assigned sessions with joined/absent + minutes attended
+ *   - past assigned sessions with joined/absent + minutes attended, or
+ *     "pending" when the per-instance participant data hasn't been fetched yet
  */
 app.get(
   '/api/my-classes',
@@ -2041,28 +2166,68 @@ app.get(
       })
       .sort((a, b) => new Date(a.start_time || 0) - new Date(b.start_time || 0));
 
-    // Past: reuse the cached roster (report + participants) — no extra Zoom walk.
-    const roster = await getRoster(days);
-    const attended = buildStudentAttendance(roster, student);
+    // Past: exact-instance attendance from Zoom's participant report.
+    //
+    // The full roster build needs one Zoom call per past session and cannot
+    // finish inside a Workers invocation (~50-subrequest cap), which is why
+    // production used to show real attendees as Absent. Fetch only this
+    // student's sessions, reuse the per-instance cache, and mark anything not
+    // fetched yet as "pending" instead of Absent.
+    const to = new Date().toISOString().slice(0, 10);
+    const from = new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+    const reportMeetings = [];
+    for (const chunk of chunkRange(from, to)) {
+      const data = await listReportMeetings({ from: chunk.from, to: chunk.to, pageSize: 300 });
+      reportMeetings.push(...(data.meetings || []));
+    }
 
-    const past = (roster.sessions || [])
-      .filter((s) => mine(s.id))
-      .map((s) => {
-        const uuid = s.uuid ? String(s.uuid) : '';
-        const instance = `${s.id}|${s.start_time}`;
-        const minutes = (uuid ? attended.byUuid.get(uuid) : undefined) ?? attended.byInstance.get(instance) ?? 0;
-        return {
-          id: s.id,
-          uuid: s.uuid,
-          topic: s.topic,
-          start_time: s.start_time,
-          duration: s.duration,
-          participants: s.participants,
-          joined: Boolean((uuid && attended.byUuid.has(uuid)) || attended.byInstance.has(instance)),
-          minutes,
-        };
-      })
+    const sessions = reportMeetings
+      .filter((m) => mine(m.id))
       .sort((a, b) => new Date(b.start_time || 0) - new Date(a.start_time || 0));
+
+    const uncached = [];
+    const seen = new Set();
+    for (const m of sessions) {
+      const key = participantKey(m);
+      if (seen.has(key) || readParticipantCache(key)) continue;
+      seen.add(key);
+      if (uncached.length < ATTENDANCE_FETCH_BUDGET) uncached.push(m);
+    }
+    await mapLimit(uncached, 4, async (m) => {
+      try {
+        await fetchParticipantsFor(m);
+      } catch {
+        /* leave this instance pending; the next visit retries */
+      }
+    });
+
+    const participantsByKey = new Map();
+    for (const m of sessions) {
+      const key = participantKey(m);
+      const rows = readParticipantCache(key);
+      if (rows) participantsByKey.set(key, rows);
+    }
+    const attended = attendanceFromParticipants(sessions, student, participantsByKey);
+
+    const past = sessions.map((s) => {
+      const key = participantKey(s);
+      const known = participantsByKey.has(key);
+      const uuid = s.uuid ? String(s.uuid) : '';
+      const instance = `${s.id}|${s.start_time}`;
+      const minutes = (uuid ? attended.byUuid.get(uuid) : undefined) ?? attended.byInstance.get(instance) ?? 0;
+      const joined = Boolean((uuid && attended.byUuid.has(uuid)) || attended.byInstance.has(instance));
+      return {
+        id: s.id,
+        uuid: s.uuid,
+        topic: s.topic,
+        start_time: s.start_time,
+        duration: s.duration,
+        participants: s.participants_count ?? s.participants ?? null,
+        joined: known ? joined : null,
+        attendance: known ? (joined ? 'joined' : 'absent') : 'pending',
+        minutes,
+      };
+    });
 
     res.json({
       student: {
@@ -2075,8 +2240,9 @@ app.get(
       past,
       stats: {
         upcoming: upcoming.length,
-        attended: past.filter((s) => s.joined).length,
-        missed: past.filter((s) => !s.joined).length,
+        attended: past.filter((s) => s.attendance === 'joined').length,
+        missed: past.filter((s) => s.attendance === 'absent').length,
+        pending: past.filter((s) => s.attendance === 'pending').length,
         minutes: past.reduce((sum, s) => sum + (s.minutes || 0), 0),
       },
       rosterWindowDays: days,

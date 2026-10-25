@@ -1008,6 +1008,8 @@ If students were added to a batch after the first enrolment, re-run the action t
 
 The Attendance tab is **not** the enrolment list. It is a roster built from actual Zoom participant reports for the selected window.
 
+The roster fetch is capped per request by the hosting platform's subrequest limit (~50 per invocation on the Workers free plan). It caches participant rows per session instance for ten minutes and fills more sessions on each refresh; the API returns `pendingSessions` for sessions whose participant rows are still outstanding. Treat a very fresh 30-day window as still backfilling rather than as proof that nobody attended.
+
 Header: **Student Roster — built from attendance**.
 
 Controls:
@@ -1421,11 +1423,13 @@ Each row shows:
 
 - topic;
 - date, duration, and total participants;
-- **Joined · duration** or **Absent**.
+- **Joined · duration**, **Absent**, or **Syncing attendance**.
 
 Attendance is based on real Zoom participant reports, not on whether you clicked the LMS page. Past attendance uses the default 30-day history window; it is an attendance view, not a full academic transcript.
 
 Matching mirrors the admin attendance audit: a join is credited when the Zoom email or the display name matches the student, and all roster rows for that person are unioned. Zoom stores joins with an email under one key and joins without an email under the display-name key, so a student can appear twice; both rows are counted. Sessions are matched by exact instance UUID (falling back to meeting ID + start time), so attending one occurrence of a recurring or Personal Meeting Room ID does not credit the other occurrences.
+
+**Why “Syncing attendance” exists.** A Cloudflare Workers invocation can make only about 50 external subrequests on the free plan, while the attendance report needs one participant call per past session (a 30-day window is often 150+ sessions). Fetching the whole academy roster in a single request therefore cannot finish; the platform starts rejecting calls and the old code silently treated the remainder as “nobody attended”. My Classes now fetches participant rows only for the signed-in student's own sessions, caches each meeting instance in memory for ten minutes, and limits how many uncached instances one request fetches. Any instance that has not been fetched yet is reported as **Syncing attendance** and retried on the next load — never as **Absent**. The admin roster uses the same per-instance cache and reports a `pendingSessions` count while its backfill advances across refreshes.
 
 ### 10.3 Cloud Recordings
 
@@ -1766,7 +1770,7 @@ erDiagram
 ### 12.3 Data that is deliberately not stored
 
 - No meetings table: Zoom is the source of truth.
-- No attendance table: reports are fetched and cached in memory.
+- No attendance table: participant rows are fetched from Zoom and cached in memory per meeting instance (ten-minute TTL); unfetched instances are surfaced as pending, not absent.
 - No recordings table: recordings remain in Zoom cloud storage.
 - No payment, invoice, certificate, or exam tables.
 - No external AI provider conversation IDs or API keys.
@@ -1885,7 +1889,7 @@ A blocked student login returns HTTP `409`.
 | `GET` | `/api/knowledge` | Signed in | Merged bot answer pool. |
 | `GET` | `/api/chats/:key` | Signed in | Read own chat history. |
 | `PUT` | `/api/chats/:key` | Signed in | Replace own chat history (empty array clears). |
-| `GET` | `/api/my-classes` | Signed in (student view; admin preview) | Assigned upcoming/past classes and attendance; `studentId`, optional `days` (1–90). Past joins are matched by exact instance UUID across every roster row that matches the student's email or name. |
+| `GET` | `/api/my-classes` | Signed in (student view; admin preview) | Assigned upcoming/past classes and attendance; `studentId`, optional `days` (1–90). Past joins are matched by exact instance UUID across every participant row that matches the student's email or name. Participant rows are fetched per instance for that student's own sessions, cached for ten minutes and capped per request; unfetched instances return `attendance: "pending"` and are excluded from Attended/Missed. |
 
 ### 13.5 API behaviour notes
 

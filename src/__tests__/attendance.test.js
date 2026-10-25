@@ -8,7 +8,7 @@
  * "Absent" even though the admin attendance audit saw the join.
  */
 import { describe, expect, it } from 'vitest';
-import { buildStudentAttendance } from '../../server/app.js';
+import { attendanceFromParticipants, buildStudentAttendance } from '../../server/app.js';
 
 const meeting = (overrides = {}) => ({
   id: 81060594579,
@@ -94,5 +94,63 @@ describe('buildStudentAttendance', () => {
     // A different instance of the same Personal Meeting Room is not credited.
     expect(byUuid.has('missed-instance')).toBe(false);
     expect(byInstance.has('81060594579|2026-10-23T11:51:44Z')).toBe(false);
+  });
+});
+
+describe('attendanceFromParticipants', () => {
+  const student = { email: 'amulya@example.com', name: 'Amulya Ratna Swain' };
+  const instance = (overrides = {}) => ({
+    id: 81060594579,
+    uuid: 'u1',
+    start_time: '2026-10-24T14:23:19Z',
+    ...overrides,
+  });
+
+  it('credits a join recorded with an email and another recorded by name', () => {
+    const rows = new Map([
+      [
+        'u1',
+        [
+          { name: 'Amulya Ratna Swain', user_email: '', duration: 600 },
+          { name: 'Amulya', user_email: 'amulya@example.com', duration: 300 },
+        ],
+      ],
+    ]);
+    const { byUuid, byInstance, pending } = attendanceFromParticipants([instance()], student, rows);
+
+    expect(byUuid.get('u1')).toBe(15);
+    expect(byInstance.get('81060594579|2026-10-24T14:23:19Z')).toBe(15);
+    expect(pending).toEqual([]);
+  });
+
+  it('marks an instance pending when its participant rows were never fetched', () => {
+    const { byUuid, pending } = attendanceFromParticipants([instance()], student, new Map());
+
+    expect(byUuid.has('u1')).toBe(false);
+    expect(pending).toEqual(['u1']);
+  });
+
+  it('treats a fetched-but-empty participant list as absent, not pending', () => {
+    const rows = new Map([['u1', []]]);
+    const { byUuid, pending } = attendanceFromParticipants([instance()], student, rows);
+
+    expect(byUuid.has('u1')).toBe(false);
+    expect(pending).toEqual([]);
+  });
+
+  it('does not credit another instance that shares the meeting id', () => {
+    const rows = new Map([
+      ['u1', [{ name: 'Amulya Ratna Swain', duration: 2640 }]],
+      ['u2', []],
+    ]);
+    const { byUuid, pending } = attendanceFromParticipants(
+      [instance(), instance({ uuid: 'u2', start_time: '2026-10-23T14:10:57Z' })],
+      student,
+      rows
+    );
+
+    expect(byUuid.get('u1')).toBe(44);
+    expect(byUuid.has('u2')).toBe(false);
+    expect(pending).toEqual([]);
   });
 });

@@ -120,6 +120,14 @@ export default function MyClasses({ student, onNavigate }) {
         />
       </div>
 
+      {!classes.loading && !classes.error && (stats?.pending ?? 0) > 0 ? (
+        <p className="rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-300">
+          Attendance for {stats.pending} session{stats.pending === 1 ? '' : 's'} is still syncing
+          from Zoom. Those rows show “Syncing attendance” instead of Absent — reload in a minute
+          to refresh them.
+        </p>
+      ) : null}
+
       {classes.loading ? (
         <Spinner label="Loading your classes…" />
       ) : classes.error ? (
@@ -213,7 +221,11 @@ export default function MyClasses({ student, onNavigate }) {
                           {m.participants ?? '—'} joined in total
                         </p>
                       </div>
-                      {m.joined ? (
+                      {m.attendance === 'pending' || m.joined === null ? (
+                        <Badge className="border border-amber-500/20 bg-amber-500/10 text-amber-400">
+                          <Clock size={10} /> Syncing attendance
+                        </Badge>
+                      ) : m.joined ? (
                         <Badge className="border border-emerald-500/20 bg-emerald-500/10 text-emerald-400">
                           <CheckCircle2 size={10} /> Joined · {formatDuration(m.minutes)}
                         </Badge>

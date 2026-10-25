@@ -132,8 +132,19 @@ const MY_CLASSES = {
       joined: true,
       minutes: 45,
     },
+    {
+      id: 8891941925,
+      uuid: 'pending-instance-uuid',
+      topic: 'Risk Management',
+      start_time: '2026-10-05T12:35:06Z',
+      duration: 60,
+      participants: 9,
+      joined: null,
+      attendance: 'pending',
+      minutes: 0,
+    },
   ],
-  stats: { upcoming: 1, attended: 1, missed: 0, minutes: 45 },
+  stats: { upcoming: 1, attended: 1, missed: 0, pending: 1, minutes: 45 },
   rosterWindowDays: 30,
   generatedAt: '2026-10-12T10:00:00Z',
 };
@@ -782,6 +793,9 @@ describe('SBC-LMS dashboard', () => {
     expect(await screen.findByText('Personal link')).toBeTruthy();
     expect(await screen.findByText('Candlesticks 101')).toBeTruthy();
     expect(await screen.findByText(/Joined · 45 min/)).toBeTruthy();
+    // Unfetched instances must read "syncing", never "Absent".
+    expect(await screen.findByText('Syncing attendance')).toBeTruthy();
+    expect(screen.queryByText('Absent')).toBeNull();
 
     // Admin-only modules and quick actions disappear; shared ones remain.
     expect(screen.queryByText('Zoom Sessions')).toBeNull();
