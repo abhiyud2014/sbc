@@ -245,6 +245,7 @@ function mockFetch() {
   mock = {
     urls: [],
     enrollCalls: [],
+    meetingPosts: [],
     questionPosts: [],
     targetPuts: [],
     questionPatches: [],
@@ -455,6 +456,7 @@ function mockFetch() {
       } else if (url.includes('/api/meetings')) {
         // POST /api/meetings creates a real meeting that then appears in the list.
         if (method === 'POST' && url.split('?')[0] === '/api/meetings') {
+          mock.meetingPosts.push(payload);
           const created = {
             id: 9911223344,
             topic: payload?.topic,
@@ -691,6 +693,32 @@ describe('SBC-LMS dashboard', () => {
     expect(await screen.findByText('Evening cohort')).toBeTruthy();
   });
 
+  it('requires at least one batch before scheduling a session', async () => {
+    renderApp();
+    fireEvent.click(await screen.findByText('Zoom Sessions'));
+    fireEvent.click(await screen.findByText('Schedule Zoom Session'));
+    const dialog = await screen.findByRole('dialog');
+
+    fireEvent.change(within(dialog).getByLabelText('Session Title'), {
+      target: { value: 'Unenrolled Class' },
+    });
+    fireEvent.change(within(dialog).getByLabelText('Date & Time'), {
+      target: { value: '2030-10-14T17:30' },
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create & Get Join Link' }));
+
+    // Blocked before any Zoom call: no meeting, no enrolment, dialog still open.
+    expect(await screen.findByText(/Select at least one batch to enrol/)).toBeTruthy();
+    expect(within(dialog).getByText(/Required — select at least one batch/)).toBeTruthy();
+    expect(mock.meetingPosts).toHaveLength(0);
+    expect(mock.enrollCalls).toHaveLength(0);
+    expect(screen.getByRole('dialog')).toBeTruthy();
+
+    // Selecting a batch satisfies the requirement and clears the error.
+    fireEvent.click(within(dialog).getByRole('button', { name: /Batch A/ }));
+    expect(within(dialog).queryByText(/Required — select at least one batch/)).toBeNull();
+  });
+
   it('auto-registers a batch when a session is scheduled', async () => {
     renderApp();
     fireEvent.click(await screen.findByText('Zoom Sessions'));
@@ -794,6 +822,70 @@ describe('SBC-LMS dashboard', () => {
     expect(promoteButtons.length).toBeGreaterThan(0);
     fireEvent.click(promoteButtons[0]);
     expect(await screen.findByText(/In the bot's knowledge base/)).toBeTruthy();
+  });
+
+  it('answers where to find a recording passcode instead of recommending a course', async () => {
+    renderApp();
+    fireEvent.click(await screen.findByText('AI Knowledge Bot'));
+
+    fireEvent.change(screen.getByPlaceholderText(/Ask anything about trading/), {
+      target: { value: 'where can I get the zoom recording passkey' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }));
+
+    // The real home of the passcode, not the beginner-recording pitch.
+    expect(await screen.findByText(/Recording passcode:/)).toBeTruthy();
+    expect(screen.getByText(/passcodes are under Cloud Recordings/)).toBeTruthy();
+    expect(screen.queryByText(/Risk Management 101/)).toBeNull();
+  });
+
+  it('refuses questions that are not about trading or this app', async () => {
+    renderApp();
+    fireEvent.click(await screen.findByText('AI Knowledge Bot'));
+
+    fireEvent.change(screen.getByPlaceholderText(/Ask anything about trading/), {
+      target: { value: 'how do I bake a chocolate cake' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /Send/ }));
+
+    expect(await screen.findByText(/outside what I can help with/i)).toBeTruthy();
+    // It must not pretend the knowledge base answered it.
+    expect(screen.queryByText(/could not find that in the local knowledge base/i)).toBeNull();
+  });
+
+  it('does not repeat an answer when the same question is submitted repeatedly', async () => {
+    renderApp();
+    fireEvent.click(await screen.findByText('AI Knowledge Bot'));
+
+    // A rapid burst on the same quick prompt (double Enter / repeated clicks).
+    const prompt = () => screen.getByRole('button', { name: /What is stop loss/ });
+    fireEvent.click(prompt());
+    fireEvent.click(prompt());
+    fireEvent.click(prompt());
+    fireEvent.click(prompt());
+    fireEvent.click(prompt());
+
+    await waitFor(() => expect(mock.questionPosts).toHaveLength(1), { timeout: 3000 });
+    expect(screen.getAllByText(/single win earns/)).toHaveLength(1);
+  });
+
+  it('collapses duplicate answers saved by an older conversation', async () => {
+    const asked = { sender: 'user', text: 'where can I get the zoom recording passkey', time: '4:41 pm' };
+    const repeated = { sender: 'bot', text: 'Start with the beginner recording.', time: '4:41 pm' };
+    localStorage.setItem(
+      'sbc.chat.admin',
+      JSON.stringify([
+        { sender: 'bot', text: 'Welcome!', time: '9:00 AM' },
+        asked, repeated, asked, repeated, asked, repeated, asked, repeated, asked, repeated,
+      ])
+    );
+
+    renderApp();
+    fireEvent.click(await screen.findByText('AI Knowledge Bot'));
+
+    expect(await screen.findByText('Start with the beginner recording.')).toBeTruthy();
+    expect(screen.getAllByText('Start with the beginner recording.')).toHaveLength(1);
+    expect(screen.getAllByText('where can I get the zoom recording passkey')).toHaveLength(1);
   });
 
   it('keeps the chat conversation when navigating away and back', async () => {

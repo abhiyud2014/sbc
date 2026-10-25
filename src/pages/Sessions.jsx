@@ -108,6 +108,16 @@ export default function Sessions({ scheduleSignal = 0, onOpenBroadcast }) {
 
   const submitCreate = async (e) => {
     e.preventDefault();
+    // Enrolment is mandatory: a session with no batch has no expected
+    // audience, no registrations, and cannot be audited for attendance.
+    if (!form.batchIds?.length) {
+      showToast(
+        'Select at least one batch to enrol before scheduling the session.',
+        'Batch required',
+        'error'
+      );
+      return false;
+    }
     const ok = await runSave(async () => {
       try {
         const created = await api.post('/meetings', {
@@ -326,6 +336,8 @@ export default function Sessions({ scheduleSignal = 0, onOpenBroadcast }) {
           onSubmit={submitCreate}
           id="create-meeting"
           batches={batchList}
+          batchesLoading={batches.loading}
+          requireBatches
         />
       </Modal>
 
@@ -521,11 +533,22 @@ function IconAction({ children, onClick, title, danger }) {
   );
 }
 
-function MeetingForm({ form, setForm, onSubmit, id, hideRegistration, batches = null }) {
+function MeetingForm({
+  form,
+  setForm,
+  onSubmit,
+  id,
+  hideRegistration,
+  batches = null,
+  batchesLoading = false,
+  requireBatches = false,
+}) {
   const set = (patch) => setForm((f) => ({ ...f, ...patch }));
   const input =
     'w-full rounded-lg border border-slate-700 bg-slate-900 px-3.5 py-2.5 text-sm text-white focus:border-accent-emerald focus:outline-none';
   const label = 'mb-1 block text-xs font-medium text-slate-300';
+  const selectedBatches = form.batchIds || [];
+  const missingBatches = requireBatches && selectedBatches.length === 0;
 
   return (
     <form id={id} onSubmit={onSubmit} className="space-y-4">
@@ -618,39 +641,65 @@ function MeetingForm({ form, setForm, onSubmit, id, hideRegistration, batches = 
         </label>
       ) : null}
 
-      {batches && batches.length ? (
+      {requireBatches || (batches && batches.length) ? (
         <div>
-          <span className={label}>Enrol batches</span>
-          <div className="flex flex-wrap gap-2">
-            {batches.map((b) => {
-              const active = (form.batchIds || []).includes(b.id);
-              return (
-                <button
-                  type="button"
-                  key={b.id}
-                  onClick={() =>
-                    set({
-                      batchIds: active
-                        ? (form.batchIds || []).filter((x) => x !== b.id)
-                        : [...(form.batchIds || []), b.id],
-                    })
-                  }
-                  aria-pressed={active}
-                  className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                    active
-                      ? 'border-accent-emerald/40 bg-accent-emerald/15 text-accent-emerald'
-                      : 'border-slate-700 bg-slate-900 text-slate-400 hover:bg-slate-800'
-                  }`}
-                >
-                  {b.name} <span className="opacity-60">· {b.memberCount}</span>
-                </button>
-              );
-            })}
-          </div>
-          <p className="mt-1.5 text-[11px] text-slate-500">
-            Picking a batch registers every student in it after the meeting is created — each gets a
-            personalised join link (Zoom registration is enabled automatically for scheduled sessions).
-          </p>
+          <span className={label}>
+            Enrol batches
+            {requireBatches ? <span className="ml-0.5 text-accent-red">*</span> : null}
+          </span>
+
+          {batches && batches.length ? (
+            <>
+              <div
+                role="group"
+                aria-label="Enrol batches"
+                aria-required={requireBatches ? 'true' : undefined}
+                aria-invalid={missingBatches ? 'true' : undefined}
+                className="flex flex-wrap gap-2"
+              >
+                {batches.map((b) => {
+                  const active = selectedBatches.includes(b.id);
+                  return (
+                    <button
+                      type="button"
+                      key={b.id}
+                      onClick={() =>
+                        set({
+                          batchIds: active
+                            ? selectedBatches.filter((x) => x !== b.id)
+                            : [...selectedBatches, b.id],
+                        })
+                      }
+                      aria-pressed={active}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
+                        active
+                          ? 'border-accent-emerald/40 bg-accent-emerald/15 text-accent-emerald'
+                          : 'border-slate-700 bg-slate-900 text-slate-400 hover:bg-slate-800'
+                      }`}
+                    >
+                      {b.name} <span className="opacity-60">· {b.memberCount}</span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p
+                className={`mt-1.5 text-[11px] ${
+                  missingBatches ? 'text-accent-red' : 'text-slate-500'
+                }`}
+              >
+                {missingBatches
+                  ? 'Required — select at least one batch to enrol before scheduling the session.'
+                  : 'Picking a batch registers every student in it after the meeting is created — each gets a personalised join link (Zoom registration is enabled automatically for scheduled sessions).'}
+              </p>
+            </>
+          ) : batchesLoading ? (
+            <p className="text-[11px] text-slate-500">Loading batches…</p>
+          ) : (
+            <p className="text-[11px] text-amber-400">
+              No batches exist yet. Create a batch under Students &amp; Batches before scheduling a
+              session — every meeting must be enrolled to at least one batch.
+            </p>
+          )}
         </div>
       ) : null}
     </form>

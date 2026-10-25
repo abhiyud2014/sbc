@@ -441,6 +441,7 @@ Worker caches are best-effort and per isolate. A cold start or a different isola
 | Data hooks | `src/hooks/useApi.js` | Loading/error/refresh state and pending-action helper. |
 | Formatting | `src/lib/format.js` | Dates, durations, meeting IDs, bytes, initials, levels. |
 | Knowledge retrieval | `src/lib/knowledgeMatch.js` | Normalisation, stopwords, abbreviation expansion, stemming, confidence scoring. |
+| Assistant scope | `src/lib/assistantScope.js` | App-help intents, trading-domain gate, out-of-scope refusal, strict floor for ambiguous one-word questions. |
 | Quick prompts | `src/lib/quickPrompts.js` | Six unique questions from the live bank, with curated fallback and shuffle. |
 
 ### 5.2 Backend components
@@ -828,16 +829,16 @@ The exact scope list can vary with the Zoom app configuration. If Activity repor
 | **Timezone** | Yes | Pre-filled from the browser timezone; editable IANA timezone string. |
 | **Brief Description (agenda)** | No | Meeting agenda shown in Zoom and used as context. |
 | **Enable registration** | No | When checked, creates the meeting with registration enabled and auto-approval. Required for personal registrant links. |
-| **Enrol batches** | No | Batch chips with member counts. Selecting batches auto-registers students after creation. |
+| **Enrol batches** | Yes | At least one batch is mandatory. Batch chips with member counts; selecting batches auto-registers students after creation. Creation is blocked until one is selected. |
 
 #### Create workflow
 
 1. Fill the form.
-2. Select one or more batches if the session is for specific cohorts.
+2. Select at least one batch under **Enrol batches** (required).
 3. Select **Create & Get Join Link**.
 4. The API creates a scheduled Zoom meeting (`type: 2`).
 5. If registration is enabled, Zoom settings include registration type and auto-approval.
-6. If batches were selected, the API:
+6. The API then:
    - records the meeting-to-batch assignment;
    - ensures registration is enabled for scheduled meetings;
    - registers every student in those batches who has a valid email;
@@ -845,6 +846,8 @@ The exact scope list can vary with the Zoom app configuration. If Activity repor
    - returns counts for registered, skipped (no email), and failed students.
 7. The app copies the meeting join URL to the clipboard when possible.
 8. A toast reports the result, for example: “Session scheduled & enrolled — N students registered.”
+
+**At least one batch is mandatory.** If no batch is selected, **Create & Get Join Link** shows “Select at least one batch to enrol before scheduling the session.” and no Zoom meeting is created; the form marks the batch picker as required. If no batches exist yet, create one first under **Students & Batches → Batches**.
 
 If meeting creation succeeds but enrolment fails, the meeting still exists and the app reports the enrolment error separately. Use the **Enrol batches** action on the meeting card to retry.
 
@@ -982,7 +985,7 @@ The batch tab updates its member count. The student's **My Classes** page will n
 **During scheduling**
 
 1. **Schedule Zoom Session**.
-2. Select batch chips under **Enrol batches**.
+2. Select at least one batch under **Enrol batches** (required — creation is blocked otherwise).
 3. Create the meeting.
 
 **After scheduling**
@@ -1274,11 +1277,26 @@ The chat header shows the active mode as **Live Webinar Q&A (Ultra-fast)** or **
 
 #### Answer priority
 
-1. Best-scoring **mentor-edited or promoted** knowledge entry.
-2. Built-in static pattern answer.
-3. Fallback answer.
+1. **Scope guard** — decide whether the question is app help, a trading question, or out of scope.
+2. For a trading question: best-scoring **mentor-edited or promoted** knowledge entry.
+3. Then the built-in static pattern answer.
+4. Fallback answer when nothing is confident.
+5. Out-of-scope questions are refused without reaching the matcher.
 
-The retrieval algorithm:
+#### Scope guard
+
+The bot only answers two kinds of question:
+
+- **Trading questions** (the knowledge bank, mentor answers, static patterns). The question must contain at least one market-domain word. Everyday words such as “capital”, “price”, “buy” or “news” are not enough on their own: they need a second domain word or a confident knowledge-base match.
+- **App help** — where a feature lives, answered from the real UI. Intents cover recording passcodes, where recordings are, class join links, class schedules, live-class passcodes, Zoom sessions, and where to start learning.
+
+Anything else returns an out-of-scope message instead of a guessed answer. This fixes questions such as “where can I get the zoom recording passkey”, which previously matched a broad recording keyword and returned a beginner-course recommendation. That question is now answered with the location of the **Recording passcode** badge on **Cloud Recordings**, and genuinely unrelated questions (“how do I bake a cake”) are refused.
+
+A mentor-corrected answer from the Q&A Log overrides the scope gate: if a mentor explicitly answered a logged question, that answer is served the next time the question (or a close paraphrase) is asked, even when the topic is outside the trading vocabulary.
+
+The bot also ignores a repeat submission of the same question while it is being answered and for 1.5 seconds afterwards, so a double Enter press or repeated quick-prompt click cannot append the same answer several times. Conversations already saved with duplicate question/answer pairs are collapsed when the chat loads.
+
+The retrieval algorithm for in-scope trading questions:
 
 - normalises text to content words;
 - removes stopwords;
@@ -1297,7 +1315,9 @@ This makes natural questions like “is forex legal in india” or “how much c
 | `mentor-approved` | Mentor-corrected answer from the Q&A Log. |
 | `knowledge-base` | Promoted knowledge pair. |
 | `local` | Built-in static pattern. |
-| `fallback` | No confident match. |
+| `app-help` | Where a feature lives in SBC-LMS (recordings, passcodes, class links). |
+| `out-of-scope` | Question refused because it is not about trading or this app. |
+| `fallback` | In-scope trading question with no confident match. |
 
 ### 9.12 Broadcast
 
@@ -1405,6 +1425,8 @@ Each row shows:
 
 Attendance is based on real Zoom participant reports, not on whether you clicked the LMS page. Past attendance uses the default 30-day history window; it is an attendance view, not a full academic transcript.
 
+Matching mirrors the admin attendance audit: a join is credited when the Zoom email or the display name matches the student, and all roster rows for that person are unioned. Zoom stores joins with an email under one key and joins without an email under the display-name key, so a student can appear twice; both rows are counted. Sessions are matched by exact instance UUID (falling back to meeting ID + start time), so attending one occurrence of a recurring or Personal Meeting Room ID does not credit the other occurrences.
+
 ### 10.3 Cloud Recordings
 
 **Navigation:** Sidebar → **Cloud Recordings**
@@ -1436,6 +1458,8 @@ Choose a mode:
 Use a **Quick Trading Prompts** question or type your own. **Shuffle** shows another set. **Clear** resets the chat.
 
 The bot answers from the academy's local knowledge base and mentor-approved answers. It is an educational study aid, not a live financial adviser, and not an external LLM. It does not provide personalised investment advice. Confirm current rules, charges, and tax rates with the exchange, your broker, or a chartered accountant.
+
+It also helps you find your way around SBC-LMS — for example, it can tell you that a recording's passcode is shown on the **Cloud Recordings** card. Questions that are neither about trading nor about using the app are refused instead of answered with a guess.
 
 ### 10.6 Changing your password
 
@@ -1861,7 +1885,7 @@ A blocked student login returns HTTP `409`.
 | `GET` | `/api/knowledge` | Signed in | Merged bot answer pool. |
 | `GET` | `/api/chats/:key` | Signed in | Read own chat history. |
 | `PUT` | `/api/chats/:key` | Signed in | Replace own chat history (empty array clears). |
-| `GET` | `/api/my-classes` | Signed in (student view; admin preview) | Assigned upcoming/past classes and attendance; `studentId`, optional `days` (1–90). |
+| `GET` | `/api/my-classes` | Signed in (student view; admin preview) | Assigned upcoming/past classes and attendance; `studentId`, optional `days` (1–90). Past joins are matched by exact instance UUID across every roster row that matches the student's email or name. |
 
 ### 13.5 API behaviour notes
 
@@ -2094,6 +2118,8 @@ Do not seed production with private export files unless you have verified the co
 | Q&A Log shows no Zoom questions | Sync is off, no in-meeting Q&A, or report scope missing | Turn on **Sync Zoom Q&A**, check the session, and verify scopes. |
 | Q&A answer edit does not appear in chat | Knowledge refresh or cached page | Refresh the bot page; the correction sync runs when fresh knowledge arrives. |
 | AI bot gives fallback | No confident knowledge match | Rephrase, or promote a mentor answer into the knowledge base. |
+| AI bot refuses a legitimate trading question | Question had no market-domain word or only one ambiguous word | Include the topic term (for example “stop loss”, “F&O”, “position size”), or promote a mentor answer and report the phrasing. |
+| Cannot schedule a Zoom session | No batch selected (mandatory) or no batches exist | Select at least one **Enrol batches** chip; create a batch under **Students & Batches → Batches** first. |
 | Broadcast has no recipients | No attendance in the lookback window or no emails | Widen the lookback, verify attendance, add emails. |
 | Broadcast does not send | It is intentionally a mail-client handoff | Send from the mail client, or add a server-side email provider. |
 | Admin preview shows “No student selected” | No participant chosen | Account menu → Participants → choose a student. |

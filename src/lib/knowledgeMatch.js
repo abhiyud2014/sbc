@@ -125,11 +125,13 @@ const scoreEntry = (queryTokens, question) => {
 const CONFIDENCE_FLOOR = 0.42;
 
 /**
- * Return the closest entry from `list` for `text`, or null when nothing is
- * close enough. An exact question match always wins, which keeps mentor-
- * corrected answers attached to the question they were written for.
+ * Return the closest entry from `list` for `text` together with its score, or
+ * null when nothing reaches `floor`. An exact question match always wins,
+ * which keeps mentor-corrected answers attached to the question they were
+ * written for. The scope guard uses a stricter floor for vague one-word
+ * questions, so the score is exposed instead of being thrown away.
  */
-export const matchEntry = (text, list) => {
+export const matchEntryScored = (text, list, floor = CONFIDENCE_FLOOR) => {
   const raw = String(text || '').trim().toLowerCase();
   const entries = Array.isArray(list) ? list : [];
   if (!raw || !entries.length) return null;
@@ -137,7 +139,7 @@ export const matchEntry = (text, list) => {
   const exact = entries.find(
     (entry) => String(entry?.question || '').trim().toLowerCase() === raw
   );
-  if (exact) return exact;
+  if (exact) return { entry: exact, score: 1 };
 
   const queryTokens = tokenize(raw);
   if (!queryTokens.length) return null;
@@ -151,5 +153,8 @@ export const matchEntry = (text, list) => {
       best = entry;
     }
   }
-  return bestScore >= CONFIDENCE_FLOOR ? best : null;
+  return best && bestScore >= floor ? { entry: best, score: bestScore } : null;
 };
+
+/** Backwards-compatible wrapper for callers that only need the entry. */
+export const matchEntry = (text, list) => matchEntryScored(text, list)?.entry || null;

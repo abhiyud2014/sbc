@@ -15,6 +15,47 @@ import express from 'express';
 import cors from 'cors';
 
 /**
+ * Which past instances did this student attend, according to the cached roster?
+ *
+ * Zoom keys a person by email when it has one and by display name when it does
+ * not, so the SAME student can appear as two roster rows (e.g. one join with
+ * email, another without). The admin attendance audit matches each join by
+ * email OR name; My Classes must do the same and union every matching row,
+ * otherwise joins recorded under the other row show up as "Absent".
+ *
+ * Returns two maps of MINUTES keyed by exact instance uuid and by
+ * `id|start_time`. A plain meeting id is deliberately not used: Personal
+ * Meeting Room rows share one id across many sessions, so id-only matching
+ * would credit every instance.
+ */
+export function buildStudentAttendance(roster, student) {
+  const wantedEmail = (student?.email || '').trim().toLowerCase();
+  const wantedName = (student?.name || '').trim().toLowerCase();
+
+  const meetings = [];
+  for (const person of roster?.students || []) {
+    const email = (person.email || '').trim().toLowerCase();
+    const name = (person.name || '').trim().toLowerCase();
+    const emailHit = Boolean(wantedEmail && email && email === wantedEmail);
+    const nameHit = Boolean(wantedName && name && name === wantedName);
+    if (emailHit || nameHit) meetings.push(...(person.meetings || []));
+  }
+
+  const byUuid = new Map();
+  const byInstance = new Map();
+  for (const meeting of meetings) {
+    const minutes = Number(meeting.minutes) || 0;
+    if (meeting.uuid) {
+      const key = String(meeting.uuid);
+      byUuid.set(key, (byUuid.get(key) || 0) + minutes);
+    }
+    const instance = `${meeting.id}|${meeting.start_time}`;
+    byInstance.set(instance, (byInstance.get(instance) || 0) + minutes);
+  }
+  return { byUuid, byInstance };
+}
+
+/**
  * Build the Express app around an injected repository set.
  *
  * `repos` is either the synchronous node:sqlite repositories (server/repos.js)
@@ -2002,23 +2043,14 @@ app.get(
 
     // Past: reuse the cached roster (report + participants) — no extra Zoom walk.
     const roster = await getRoster(days);
-    const attended = roster.students.find((p) => {
-      const email = (p.email || '').trim().toLowerCase();
-      if (student.email && email) return email === student.email.toLowerCase();
-      return (p.name || '').trim().toLowerCase() === (student.name || '').trim().toLowerCase();
-    });
-
-    const byUuid = new Map();
-    const byId = new Map();
-    for (const m of attended?.meetings || []) {
-      if (m.uuid) byUuid.set(String(m.uuid), m);
-      byId.set(String(m.id), m);
-    }
+    const attended = buildStudentAttendance(roster, student);
 
     const past = (roster.sessions || [])
       .filter((s) => mine(s.id))
       .map((s) => {
-        const hit = (s.uuid && byUuid.get(String(s.uuid))) || byId.get(String(s.id)) || null;
+        const uuid = s.uuid ? String(s.uuid) : '';
+        const instance = `${s.id}|${s.start_time}`;
+        const minutes = (uuid ? attended.byUuid.get(uuid) : undefined) ?? attended.byInstance.get(instance) ?? 0;
         return {
           id: s.id,
           uuid: s.uuid,
@@ -2026,8 +2058,8 @@ app.get(
           start_time: s.start_time,
           duration: s.duration,
           participants: s.participants,
-          joined: Boolean(hit),
-          minutes: hit?.minutes || 0,
+          joined: Boolean((uuid && attended.byUuid.has(uuid)) || attended.byInstance.has(instance)),
+          minutes,
         };
       })
       .sort((a, b) => new Date(b.start_time || 0) - new Date(a.start_time || 0));

@@ -3,8 +3,14 @@ import { Bot, BookOpen, Bolt, MessageSquare, RefreshCw, Send, Trash2 } from 'luc
 import { api } from '../lib/api.js';
 import { useApi } from '../hooks/useApi.js';
 import { matchEntry } from '../lib/knowledgeMatch.js';
+import { classifyQuestion, OUT_OF_SCOPE } from '../lib/assistantScope.js';
 import { pickQuickPrompts } from '../lib/quickPrompts.js';
 
+/**
+ * Built-in answers for clear trading questions. Kept deliberately narrow: app
+ * navigation (“where is my recording passcode”) is answered by the scope guard
+ * in `lib/assistantScope.js`, not by a broad `/recording/` pattern here.
+ */
 const KNOWLEDGE = [
   {
     match: /stop ?loss|r: ?r|risk.?to.?reward/i,
@@ -20,16 +26,6 @@ const KNOWLEDGE = [
     match: /drawdown|prop firm|daily loss/i,
     answer:
       'Most prop firms cap daily loss at 5% of the starting balance and total drawdown at 8–10% (trailing or static). Breaching the daily limit usually ends the challenge instantly, so size positions so that stop-out distance × lot size stays under the daily budget.',
-  },
-  {
-    match: /recording|watch first|beginner/i,
-    answer:
-      'Start with “Price Action & Support/Resistance Mastery” (Beginner), then “Risk Management 101: Position Sizing”. Both live under the Cloud Recordings tab once the session has finished and synced from Zoom.',
-  },
-  {
-    match: /zoom|webinar|join|session/i,
-    answer:
-      'Sessions are created through the Zoom Server-to-Server API in the Zoom Sessions tab. Every meeting there has a real meeting ID, passcode and join URL — click Join to open it in the Zoom Workplace client.',
   },
 ];
 
@@ -59,10 +55,51 @@ const chatKey = (viewer) => {
 
 const cacheKey = (key) => `sbc.chat.${key}`;
 
+/**
+ * Collapse accidental duplicate bubbles in a saved conversation.
+ *
+ * A burst of Enter presses (or repeated quick-prompt clicks) used to store the
+ * same question and answer several times. This keeps one copy of an adjacent
+ * duplicate or of a repeated question→answer exchange, while preserving a
+ * deliberate repeat whose answer differs (for example after a mentor edit).
+ */
+export const collapseRepeats = (messages) => {
+  const list = Array.isArray(messages) ? messages : [];
+  const out = [];
+  let i = 0;
+  while (i < list.length) {
+    const current = list[i];
+    const prev = out[out.length - 1];
+
+    if (prev && prev.sender === current.sender && prev.text === current.text) {
+      i += 1;
+      continue;
+    }
+
+    const next = list[i + 1];
+    const beforePrev = out[out.length - 2];
+    if (
+      current.sender === 'user' &&
+      next?.sender === 'bot' &&
+      beforePrev?.sender === 'user' &&
+      beforePrev.text === current.text &&
+      prev?.sender === 'bot' &&
+      prev.text === next.text
+    ) {
+      i += 2;
+      continue;
+    }
+
+    out.push(current);
+    i += 1;
+  }
+  return out;
+};
+
 const loadChat = (key) => {
   try {
     const parsed = JSON.parse(localStorage.getItem(cacheKey(key)) || 'null');
-    if (Array.isArray(parsed) && parsed.length) return parsed;
+    if (Array.isArray(parsed) && parsed.length) return collapseRepeats(parsed);
   } catch {
     /* corrupt or unavailable storage — start fresh */
   }
@@ -80,13 +117,18 @@ const saveChat = (key, messages) => {
 /**
  * AI Knowledge bot (local rule-based demo — swap in an LLM endpoint here).
  *
- * Answer order: mentor-edited/promoted answers (`GET /api/knowledge`) first,
- * then the built-in static KNOWLEDGE patterns. Every question is logged
- * server-side with the viewer's attribution so the admin can audit them in
- * Q&A Log: `POST /api/questions` (fire-and-forget — a logging failure never
- * blocks chat). The conversation itself is persisted SERVER-side per viewer
- * (`GET/PUT /api/chats/:key`) so it follows the student across browsers;
- * localStorage only keeps a cache for instant paint.
+ * Answer order:
+ *   1. app-help intents (where a feature lives) from `lib/assistantScope.js`;
+ *   2. mentor-edited/promoted answers (`GET /api/knowledge`);
+ *   3. built-in static KNOWLEDGE patterns.
+ * Anything that is neither app help nor a trading question is refused before
+ * retrieval, so unrelated questions cannot pick up a lucky token match.
+ *
+ * Every question is logged server-side with the viewer's attribution so the
+ * admin can audit them in Q&A Log: `POST /api/questions` (fire-and-forget — a
+ * logging failure never blocks chat). The conversation itself is persisted
+ * SERVER-side per viewer (`GET/PUT /api/chats/:key`) so it follows the student
+ * across browsers; localStorage only keeps a cache for instant paint.
  */
 export default function Chatbot({ viewer }) {
   const [mode, setMode] = useState('session');
@@ -99,6 +141,11 @@ export default function Chatbot({ viewer }) {
   // against being clobbered by a stale/empty local cache.
   const [hydrated, setHydrated] = useState(false);
   const endRef = useRef(null);
+  // Repeated Enter presses / quick-prompt clicks used to append the same
+  // question several times, so the same answer appeared over and over.
+  // Track questions that are still being answered and debounce a repeat.
+  const pendingRef = useRef(new Set());
+  const lastSentRef = useRef({ text: '', at: 0 });
 
   // Re-open the right conversation when the viewer changes (admin preview).
   useEffect(() => {
@@ -117,7 +164,7 @@ export default function Chatbot({ viewer }) {
       .then((data) => {
         if (!alive) return;
         const server = Array.isArray(data?.messages) ? data.messages : [];
-        if (server.length) setMessages(server);
+        if (server.length) setMessages(collapseRepeats(server));
         else {
           const cached = loadChat(storeKey);
           if (cached.length > 1) {
@@ -196,18 +243,58 @@ export default function Chatbot({ viewer }) {
   const send = (rawText) => {
     const text = (rawText ?? input).trim();
     if (!text) return;
+
+    // One answer per in-flight question. A burst of Enter presses (or five
+    // clicks on the same quick prompt) must not queue five identical answers.
+    const fingerprint = text.toLowerCase().replace(/\s+/g, ' ');
+    if (pendingRef.current.has(fingerprint)) return;
+    if (
+      lastSentRef.current.text === fingerprint &&
+      Date.now() - lastSentRef.current.at < 1500
+    ) {
+      return;
+    }
+    pendingRef.current.add(fingerprint);
+    lastSentRef.current = { text: fingerprint, at: Date.now() };
+
     setMessages((m) => [...m, { sender: 'user', text, time: now() }]);
     setInput('');
     setTyping(true);
 
     setTimeout(() => {
-      // 1) Promoted knowledge-base answers (best-scoring entry).
+      // Classify first: unrelated questions are refused before they can reach
+      // the matcher, and app-help questions are answered with the real UI path.
       const kbList = knowledge.data?.knowledge || [];
-      const kbHit = matchEntry(text, kbList);
+      const scope = classifyQuestion(text, kbList);
+      const tradingQuestion = scope.kind === 'trading';
+      const kbHit = tradingQuestion ? scope.entry || matchEntry(text, kbList) : null;
 
-      // 2) Built-in static patterns.
-      const staticHit = KNOWLEDGE.find((k) => k.match.test(text));
-      const answer = kbHit ? kbHit.answer : staticHit ? staticHit.answer : FALLBACK;
+      // Built-in static patterns only for trading questions.
+      const staticHit = tradingQuestion ? KNOWLEDGE.find((k) => k.match.test(text)) : null;
+
+      const answer =
+        scope.kind === 'app-help'
+          ? scope.entry.answer
+          : scope.kind === 'out-of-scope'
+            ? OUT_OF_SCOPE
+            : kbHit
+              ? kbHit.answer
+              : staticHit
+                ? staticHit.answer
+                : FALLBACK;
+
+      const source =
+        scope.kind === 'app-help'
+          ? 'app-help'
+          : scope.kind === 'out-of-scope'
+            ? 'out-of-scope'
+            : kbHit
+              ? kbHit.source === 'qa-edit'
+                ? 'mentor-approved'
+                : 'knowledge-base'
+              : staticHit
+                ? 'local'
+                : 'fallback';
 
       setMessages((m) => [
         ...m,
@@ -216,16 +303,11 @@ export default function Chatbot({ viewer }) {
           text: answer,
           time: now(),
           mode,
-          source: kbHit
-            ? kbHit.source === 'qa-edit'
-              ? 'mentor-approved'
-              : 'knowledge-base'
-            : staticHit
-              ? 'local'
-              : 'fallback',
+          source,
         },
       ]);
       setTyping(false);
+      pendingRef.current.delete(fingerprint);
 
       // Every question lands in the admin's Q&A audit log with attribution.
       api
