@@ -13,6 +13,7 @@ worker/seed.sql
 # Sensitive local exports — never commit
 SBC-Traders-Credentials.csv
 students DETAILS.csv
+session-as-on-*.md
 
 # Local SQLite database and generated data exports (real student data)
 server/sbc.db
